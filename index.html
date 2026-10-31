@@ -402,6 +402,9 @@
           <li><b>Cuidado:</b> bater na parede ou no próprio corpo é game over.</li>
           <li><b>Pegadinha:</b> a cada 2 segundos o Claude Code foge uma casa para longe de você.</li>
           <li><b>Velocidade:</b> aumenta a cada 5 itens comidos.</li>
+          <li><b>⚠ Contra-ataque:</b> a cada 10 itens, o Claude Code vira uma cobra e te persegue por 15 s.
+            Se ele morder seu corpo, você perde um pedaço; se pegar sua cabeça, é game over.
+            Fuja até o tempo acabar (+5) ou ataque a cauda dele <b>✂</b> (+2 cada) até derrotá-lo (+10).</li>
         </ul>
         <button class="menu-item back" data-action="back">← Voltar</button>
       </section>
@@ -434,6 +437,9 @@
   const MIN_DELAY = 60;         // velocidade máxima (ms por passo)
   const DELAY_STEP = 12;        // quanto acelera a cada 5 comidas
   const FLEE_INTERVAL = 2000;   // a comida tenta fugir a cada 2 s
+  const CHASE_EVERY = 10;       // a cada 10 comidas, o Claude Code contra-ataca
+  const CHASE_TIME = 15000;     // duração da perseguição (ms)
+  const WARN_TIME = 1600;       // aviso antes do inimigo começar a andar (ms)
   const STORAGE_KEY = 'antigravity-vs-claude-code:recorde';
   const SKIN_KEY = 'antigravity-vs-claude-code:skin';
   const SKIN_IMG_KEY = 'antigravity-vs-claude-code:skin-img';
@@ -459,6 +465,11 @@
     'Recursão infinita: mordeu o próprio rabo.',
     'Dependência circular detectada.',
     'Deadlock: a cobra travou em si mesma.'
+  ];
+  const CAUGHT_REASONS = [
+    'O Claude Code te alcançou! Código refatorado.',
+    'Capturado pelo Claude Code: PR rejeitado.',
+    'O Claude Code fez um rewrite de você.'
   ];
 
   /* =========================================================
@@ -555,6 +566,8 @@
   let rings = [];
   let floaters = [];
   let time = 0;                 // tempo total (para animações)
+  let chase = null;             // cobra inimiga do contra-ataque (null = sem perseguição)
+  let wave = 0;                 // quantas vezes o Claude Code já contra-atacou
 
   // Dimensões (recalculadas no resize)
   let size = 400, cell = 20, dpr = 1;
@@ -633,6 +646,8 @@
     particles = [];
     rings = [];
     floaters = [];
+    chase = null;
+    wave = 0;
     placeFood();
     updateHud();
   }
@@ -718,9 +733,7 @@
     updateHud();
 
     // Tremidinha na tela
-    wrap.classList.remove('shake');
-    void wrap.offsetWidth; // reinicia a animação CSS
-    wrap.classList.add('shake');
+    shakeScreen();
 
     // Pequeno atraso para o jogador ver a batida antes da tela final
     setTimeout(() => { if (state === 'over') showOverlay(ui.ovOver); }, 450);
@@ -790,15 +803,193 @@
     // Colisão com a parede
     if (!inBounds(head)) { gameOver(pick(WALL_REASONS)); return; }
 
-    const willEat = head.x === food.x && head.y === food.y;
+    // Durante o contra-ataque não há comida no tabuleiro
+    const willEat = !chase && head.x === food.x && head.y === food.y;
 
     // Colisão com o corpo (a ponta da cauda sai do lugar, exceto quando come)
     const body = willEat ? snake : snake.slice(0, -1);
     if (body.some((s) => s.x === head.x && s.y === head.y)) { gameOver(pick(SELF_REASONS)); return; }
 
+    // Colisão com a cobra inimiga
+    let cutEnemyTail = false;
+    if (chase) {
+      const segs = chase.segs;
+      const tail = segs[segs.length - 1];
+      const onTail = segs.length > 1 && samePos(head, tail) && !samePos(tail, segs[0]);
+      if (onTail) cutEnemyTail = true;                                   // ataque pela cauda ✂
+      else if (samePos(head, segs[0])) { gameOver('Colisão frontal com o Claude Code.'); return; }
+      else if (segs.some((s) => samePos(s, head))) { gameOver('Bateu no corpo do Claude Code.'); return; }
+    }
+
     snake.unshift(head);
     if (willEat) eat();
     else snake.pop();
+
+    if (cutEnemyTail) cutTail();
+  }
+
+  /* =========================================================
+     CONTRA-ATAQUE: o Claude Code vira cobra e persegue você
+     ========================================================= */
+  const samePos = (a, b) => a.x === b.x && a.y === b.y;
+  const DIRS4 = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
+
+  function shakeScreen() {
+    wrap.classList.remove('shake');
+    void wrap.offsetWidth; // reinicia a animação CSS
+    wrap.classList.add('shake');
+  }
+
+  function startChase() {
+    wave++;
+    const head = snake[0];
+
+    // Nasce longe da cabeça do jogador
+    const free = [];
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const p = { x, y };
+        if (!onSnake(p)) free.push(p);
+      }
+    }
+    free.sort((a, b) => dist2(b, head) - dist2(a, head));
+    const spawn = pick(free.slice(0, 12));
+
+    // Começa "enrolado" numa casa só e vai se desenrolando ao andar
+    const len = 4 + wave;
+    const segs = Array.from({ length: len }, () => ({ ...spawn }));
+
+    chase = {
+      phase: 'warn',              // 'warn' (aviso) → 'hunt' (perseguindo)
+      warn: WARN_TIME,
+      time: CHASE_TIME,
+      segs,
+      prevSegs: segs.map((s) => ({ ...s })),
+      acc: 0,
+      // Um pouco mais lento que você, mas acelera a cada onda
+      delay: Math.max(MIN_DELAY + 15, delay * Math.max(1.2, 1.5 - 0.1 * (wave - 1)))
+    };
+
+    const cx = (spawn.x + 0.5) * cell, cy = (spawn.y + 0.5) * cell;
+    spawnParticles(cx, cy);
+    shakeScreen();
+  }
+
+  // Próximo passo do inimigo: caminho mais curto (BFS) até a sua cabeça
+  function enemyNextDir() {
+    const segs = chase.segs, head = segs[0], target = snake[0];
+    const key = (x, y) => y * COLS + x;
+
+    // Bloqueia o próprio corpo (menos a ponta da cauda, que vai sair do lugar)
+    const blocked = new Uint8Array(COLS * ROWS);
+    for (let i = 0; i < segs.length - 1; i++) blocked[key(segs[i].x, segs[i].y)] = 1;
+
+    const valid = DIRS4.filter((d) => {
+      const x = head.x + d.x, y = head.y + d.y;
+      return x >= 0 && y >= 0 && x < COLS && y < ROWS && !blocked[key(x, y)];
+    });
+    if (!valid.length) return null;
+
+    // "Alucinação": às vezes faz um movimento aleatório, dando chance de fuga
+    if (Math.random() < 0.12) return pick(valid);
+
+    const start = key(head.x, head.y);
+    const prev = new Int16Array(COLS * ROWS).fill(-1);
+    prev[start] = start;
+    const queue = [start];
+    let found = -1;
+    for (let qi = 0; qi < queue.length; qi++) {
+      const cur = queue[qi];
+      const cx = cur % COLS, cy = (cur / COLS) | 0;
+      if (cx === target.x && cy === target.y) { found = cur; break; }
+      for (const d of DIRS4) {
+        const nx = cx + d.x, ny = cy + d.y;
+        if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+        const nk = key(nx, ny);
+        if (prev[nk] !== -1 || blocked[nk]) continue;
+        prev[nk] = cur;
+        queue.push(nk);
+      }
+    }
+
+    if (found >= 0) {
+      // Volta pelo caminho até achar o primeiro passo
+      let c = found;
+      while (prev[c] !== start) c = prev[c];
+      return { x: (c % COLS) - head.x, y: ((c / COLS) | 0) - head.y };
+    }
+
+    // Sem caminho: vai para a casa válida mais próxima do alvo
+    valid.sort((a, b) =>
+      dist2({ x: head.x + a.x, y: head.y + a.y }, target) - dist2({ x: head.x + b.x, y: head.y + b.y }, target));
+    return valid[0];
+  }
+
+  function enemyStep() {
+    const d = enemyNextDir();
+    chase.prevSegs = chase.segs.map((s) => ({ ...s }));
+    if (!d) return; // encurralado: fica parado
+
+    const nh = { x: chase.segs[0].x + d.x, y: chase.segs[0].y + d.y };
+
+    // Pegou a sua cabeça: fim de jogo
+    if (samePos(nh, snake[0])) { gameOver(pick(CAUGHT_REASONS)); return; }
+
+    chase.segs.unshift(nh);
+    chase.segs.pop();
+
+    // Mordeu o seu corpo: você perde tudo dali até a cauda
+    const idx = snake.findIndex((s, i) => i > 0 && samePos(s, nh));
+    if (idx > 0) {
+      const lost = snake.length - idx;
+      snake = snake.slice(0, idx);
+      prevSnake = prevSnake.slice(0, idx);
+      const cx = (nh.x + 0.5) * cell, cy = (nh.y + 0.5) * cell;
+      spawnParticles(cx, cy);
+      spawnFloater(`Mordida! -${lost} segmento${lost > 1 ? 's' : ''}`, cx, cy, '#f85149');
+      shakeScreen();
+    }
+  }
+
+  // Você acertou a cauda do inimigo
+  function cutTail() {
+    const tail = chase.segs.pop();
+    chase.prevSegs.pop();
+    score += 2;
+    const cx = (tail.x + 0.5) * cell, cy = (tail.y + 0.5) * cell;
+    spawnParticles(cx, cy);
+    spawnFloater('✂ Cauda cortada! +2', cx, cy, '#e3b341');
+    updateHud();
+    if (chase.segs.length <= 1) defeatEnemy(true);
+  }
+
+  // Fim do contra-ataque: derrotado por cortes (true) ou tempo esgotado (false)
+  function defeatEnemy(byCombat) {
+    const bonus = byCombat ? 10 : 5;
+    score += bonus;
+    for (const s of chase.segs) spawnParticles((s.x + 0.5) * cell, (s.y + 0.5) * cell);
+    spawnFloater(byCombat ? `Claude Code derrotado! +${bonus}` : `Rate limit atingido! +${bonus}`,
+      size / 2, size * 0.42, byCombat ? '#3fb950' : '#58a6ff', 1.2);
+    chase = null;
+    placeFood();
+    fleeTimer = 0;
+    updateHud();
+  }
+
+  // Atualiza o contra-ataque a cada quadro (só com o jogo rodando)
+  function updateChase(dt) {
+    if (chase.phase === 'warn') {
+      chase.warn -= dt;
+      if (chase.warn <= 0) chase.phase = 'hunt';
+      return;
+    }
+    chase.time -= dt;
+    chase.acc += dt;
+    while (chase && state === 'playing' && chase.acc >= chase.delay) {
+      chase.acc -= chase.delay;
+      enemyStep();
+    }
+    if (chase && state === 'playing' && chase.time <= 0) defeatEnemy(false);
   }
 
   function eat() {
@@ -817,8 +1008,11 @@
     }
 
     updateHud();
-    placeFood();
     fleeTimer = 0; // dá um respiro antes da nova comida começar a fugir
+
+    // A cada 10 comidas, o próximo Claude Code vira cobra e contra-ataca
+    if (eaten % CHASE_EVERY === 0) startChase();
+    else placeFood();
   }
 
   /* =========================================================
@@ -1308,9 +1502,158 @@
     // Fração entre o passo anterior e o próximo (para interpolar)
     const alpha = state === 'start' ? 1 : Math.min(1, acc / delay);
     drawBoard();
-    drawFood();
+    if (chase) drawEnemy();
+    else drawFood();
     drawSnake(alpha);
     drawEffects();
+    if (chase) drawChaseUI();
+  }
+
+  /* =========================================================
+     DESENHO DO CONTRA-ATAQUE
+     ========================================================= */
+  function drawEnemy() {
+    const e = chase;
+    const alpha = e.phase === 'hunt' ? Math.min(1, e.acc / e.delay) : 1;
+    const n = e.segs.length;
+    const pts = e.segs.map((s, i) => {
+      const p = e.prevSegs[i] || s;
+      return { x: (lerp(p.x, s.x, alpha) + 0.5) * cell, y: (lerp(p.y, s.y, alpha) + 0.5) * cell };
+    });
+
+    // Corpo terracota, esmaecendo até a cauda
+    for (let i = n - 1; i >= 1; i--) {
+      const t = i / Math.max(1, n - 1);
+      const s = cell * lerp(0.8, 0.6, t);
+      const color = `hsla(16, 68%, ${lerp(58, 42, t)}%, ${lerp(0.95, 0.6, t)})`;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = s * 0.78;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pts[i].x, pts[i].y);
+      ctx.lineTo(pts[i - 1].x, pts[i - 1].y);
+      ctx.stroke();
+      ctx.fillStyle = color;
+      roundRect(pts[i].x - s / 2, pts[i].y - s / 2, s, s, s * 0.3);
+      ctx.fill();
+    }
+
+    // Cauda destacada: é ali que você ataca ✂
+    if (n > 1 && e.phase === 'hunt' && !samePos(e.segs[n - 1], e.segs[0])) {
+      const tp = pts[n - 1];
+      const s = cell * 0.82;
+      const pulse = 0.5 + 0.5 * Math.sin(time / 140);
+      ctx.save();
+      ctx.setLineDash([cell * 0.12, cell * 0.08]);
+      ctx.lineDashOffset = -time / 40;
+      ctx.strokeStyle = `rgba(227, 179, 65, ${0.55 + 0.45 * pulse})`;
+      ctx.lineWidth = Math.max(1.5, cell * 0.07);
+      roundRect(tp.x - s / 2, tp.y - s / 2, s, s, s * 0.3);
+      ctx.stroke();
+      ctx.restore();
+      ctx.font = `${Math.max(10, cell * 0.42)}px ui-monospace, Consolas, monospace`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#e3b341';
+      ctx.fillText('✂', tp.x, tp.y);
+    }
+
+    // Cabeça: o próprio Claude Code (com a skin escolhida), brilho vermelho e cara de bravo
+    const h = pts[0];
+    const pop = e.phase === 'warn' ? easeOut(Math.min(1, (WARN_TIME - e.warn) / 400)) : 1;
+    const pulse = 0.5 + 0.5 * Math.sin(time / 120);
+    ctx.save();
+    ctx.shadowColor = 'rgba(248, 81, 73, 0.9)';
+    ctx.shadowBlur = cell * (0.6 + 0.4 * pulse);
+    ctx.fillStyle = `rgba(248, 81, 73, ${0.22 + 0.15 * pulse})`;
+    ctx.beginPath();
+    ctx.arc(h.x, h.y, cell * 0.64 * pop, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    paintFoodIcon(ctx, h.x, h.y, cell * 0.84 * pop);
+
+    // Sobrancelhas bravas em "V"
+    if (pop > 0.9) {
+      ctx.strokeStyle = '#f85149';
+      ctx.lineWidth = Math.max(1.5, cell * 0.09);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(h.x - cell * 0.34, h.y - cell * 0.6);
+      ctx.lineTo(h.x - cell * 0.1, h.y - cell * 0.48);
+      ctx.moveTo(h.x + cell * 0.34, h.y - cell * 0.6);
+      ctx.lineTo(h.x + cell * 0.1, h.y - cell * 0.48);
+      ctx.stroke();
+    }
+  }
+
+  // Ajusta o tamanho da fonte para o texto caber na largura
+  function fitFont(text, maxW, px, weight = 'bold') {
+    ctx.font = `${weight} ${px}px ui-monospace, Consolas, monospace`;
+    const w = ctx.measureText(text).width;
+    if (w > maxW) {
+      px *= maxW / w;
+      ctx.font = `${weight} ${px}px ui-monospace, Consolas, monospace`;
+    }
+    return px;
+  }
+
+  // Vinheta vermelha, aviso inicial e cronômetro
+  function drawChaseUI() {
+    const pulse = 0.5 + 0.5 * Math.sin(time / 160);
+    const warn = chase.phase === 'warn';
+
+    const g = ctx.createRadialGradient(size / 2, size / 2, size * 0.35, size / 2, size / 2, size * 0.75);
+    g.addColorStop(0, 'rgba(248, 81, 73, 0)');
+    g.addColorStop(1, `rgba(248, 81, 73, ${warn ? 0.1 + 0.3 * pulse : 0.1 + 0.08 * pulse})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    if (warn) {
+      // Faixa de alerta no meio da tela
+      const bh = Math.max(56, cell * 3);
+      const by = size / 2 - bh / 2;
+      ctx.fillStyle = 'rgba(13, 17, 23, 0.88)';
+      ctx.fillRect(0, by, size, bh);
+      ctx.fillStyle = `rgba(248, 81, 73, ${0.6 + 0.4 * pulse})`;
+      ctx.fillRect(0, by, size, Math.max(2, cell * 0.08));
+      ctx.fillRect(0, by + bh - Math.max(2, cell * 0.08), size, Math.max(2, cell * 0.08));
+
+      const t1 = '⚠ O CLAUDE CODE VIROU A COBRA!';
+      fitFont(t1, size * 0.9, Math.max(14, cell * 0.66));
+      ctx.globalAlpha = 0.65 + 0.35 * pulse;
+      ctx.fillStyle = '#f85149';
+      ctx.fillText(t1, size / 2, by + bh * 0.38);
+      ctx.globalAlpha = 1;
+
+      const t2 = `Onda ${wave} · fuja por ${CHASE_TIME / 1000}s ou ataque a cauda dele ✂`;
+      fitFont(t2, size * 0.9, Math.max(10, cell * 0.36), '600');
+      ctx.fillStyle = '#e6edf3';
+      ctx.fillText(t2, size / 2, by + bh * 0.72);
+      return;
+    }
+
+    // Barra de tempo no topo
+    const frac = Math.max(0, chase.time / CHASE_TIME);
+    const bx = cell, bw = size - cell * 2, by = cell * 0.3, bhh = Math.max(4, cell * 0.18);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    roundRect(bx, by, bw, bhh, bhh / 2);
+    ctx.fill();
+    ctx.fillStyle = frac < 0.3 ? '#3fb950' : '#f85149'; // fica verde perto do fim: "aguenta firme!"
+    roundRect(bx, by, Math.max(bhh, bw * frac), bhh, bhh / 2);
+    ctx.fill();
+
+    const cuts = chase.segs.length - 1;
+    const label = `⚠ FUJA! ${Math.ceil(chase.time / 1000)}s  ·  ✂ ${cuts} corte${cuts !== 1 ? 's' : ''} p/ derrotar`;
+    fitFont(label, size * 0.9, Math.max(11, cell * 0.36));
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = 'rgba(13, 17, 23, 0.9)';
+    ctx.strokeText(label, size / 2, by + bhh + cell * 0.42);
+    ctx.fillStyle = '#f85149';
+    ctx.fillText(label, size / 2, by + bhh + cell * 0.42);
   }
 
   /* =========================================================
@@ -1323,8 +1666,11 @@
 
     if (state !== 'paused') time += dt;
 
+    // Durante o aviso do contra-ataque, a sua cobra fica congelada
+    const frozen = chase && chase.phase === 'warn';
+
     if (state === 'playing') {
-      acc += dt;
+      if (!frozen) acc += dt;
       while (acc >= delay && state === 'playing') {
         acc -= delay;
         step();
@@ -1332,8 +1678,9 @@
       fleeTimer += dt;
       if (fleeTimer >= FLEE_INTERVAL && state === 'playing') {
         fleeTimer -= FLEE_INTERVAL;
-        fleeFood();
+        if (!chase) fleeFood();
       }
+      if (chase && state === 'playing') updateChase(dt);
     }
 
     if (state !== 'paused') updateEffects(dt);
