@@ -280,6 +280,36 @@
     padding: 4px 16px 10px;
     text-align: center;
   }
+  /* =========================================================
+     MODO HALLOWEEN (classe "halloween" no <body>)
+     ========================================================= */
+  body.halloween {
+    --bg: #0f0a14;
+    --panel: #1a1122;
+    --panel2: #22162d;
+    --border: #3d2a4d;
+    --blue: #c39bff;
+    --green: #ff8c1a;
+    --orange: #ff8c1a;
+    --yellow: #ffd34d;
+  }
+  body.halloween .menu {
+    background:
+      radial-gradient(ellipse 80% 50% at 50% 0%, rgba(160, 90, 255, .16), transparent 70%),
+      radial-gradient(ellipse 70% 45% at 50% 100%, rgba(255, 140, 26, .14), transparent 70%),
+      var(--bg);
+  }
+  body.halloween .menu-item.primary { background: #ff8c1a; border-color: #ff8c1a; }
+  body.halloween .menu-item.primary:hover,
+  body.halloween .menu-item.primary:focus-visible { background: #ffa244; border-color: #ffa244; }
+  body.halloween .btn { background: #ff8c1a; box-shadow: 0 4px 0 #b35a00; }
+  body.halloween .btn:active { box-shadow: 0 1px 0 #b35a00; }
+  body.halloween .btn.ghost { background: transparent; box-shadow: none; }
+  body.halloween .menu .title .ag {
+    background: linear-gradient(90deg, #ff8c1a, #ffd34d, #c39bff, #8a5cff);
+    -webkit-background-clip: text; background-clip: text;
+  }
+  #btn-theme b { color: var(--orange); }
 </style>
 </head>
 <body>
@@ -305,7 +335,7 @@
       <div class="overlay" id="ov-pause">
         <div class="card">
           <h1>⏸ Pausado</h1>
-          <p class="err">// aguardando revisão do PR...</p>
+          <p class="err" id="pause-msg">// aguardando revisão do PR...</p>
           <button class="btn" id="btn-resume">▶ Continuar</button>
           <button class="btn ghost" id="btn-menu-pause">☰ Menu</button>
           <p class="hint"><kbd>P</kbd> / <kbd>Espaço</kbd> para voltar · <kbd>M</kbd> menu</p>
@@ -315,7 +345,7 @@
       <!-- Tela de game over -->
       <div class="overlay" id="ov-over">
         <div class="card">
-          <h2>Stack overflow!</h2>
+          <h2 id="over-title">Stack overflow!</h2>
           <p class="err" id="over-reason">Exception in thread "main"</p>
           <div class="record" id="over-record" hidden>★ NOVO RECORDE ★</div>
           <div class="stats">
@@ -338,9 +368,9 @@
 
       <!-- Tela principal do menu -->
       <section class="menu-view active" data-view="main">
-        <div class="comment">// v1.1.0 — agora com skins</div>
+        <div class="comment" id="menu-comment">// v1.2.0 — agora com skins e modo Halloween</div>
         <h1 class="title"><span class="ag">Antigravity</span> <span class="vs">vs</span> <span class="cc">Claude Code</span></h1>
-        <p class="sub">A disputa pelo seu terminal</p>
+        <p class="sub" id="menu-sub">A disputa pelo seu terminal</p>
 
         <div class="versus">
           <div class="fighter"><canvas class="pv" data-pv="snake"></canvas><span>você<br><b>Antigravity</b></span></div>
@@ -351,6 +381,7 @@
         <nav class="menu-list">
           <button class="menu-item primary" data-action="play">▶ Jogar</button>
           <button class="menu-item" data-action="skins">🎨 Skins</button>
+          <button class="menu-item" data-action="theme" id="btn-theme">🎃 Modo: <b id="theme-label">Normal</b></button>
           <button class="menu-item" data-action="howto">❔ Como jogar</button>
         </nav>
         <p class="menu-best">recorde: <b id="menu-best">0</b></p>
@@ -466,6 +497,32 @@
     'Dependência circular detectada.',
     'Deadlock: a cobra travou em si mesma.'
   ];
+  // Textos da edição de Halloween
+  const HALLOWEEN_TEXT = {
+    eat: [
+      'Doces ou bugs?!', '+1 abóbora consumida!', 'Deploy assombrado!', 'Código zumbi eliminado!',
+      'Bug do além resolvido!', 'Feitiço compilado!', 'Bruxaria de regex!', 'Memória fantasma liberada!',
+      'Commit amaldiçoado!', 'rm -rf /cemiterio', 'Abóbora em produção!', 'Travessura no main!',
+      'Merge no cemitério!', 'Testes ressuscitados!', 'Lint exorcizado!', 'Buuu! +1 token'
+    ],
+    speed: ['🦇 Velocidade sobrenatural!', '🧹 Vassoura turbo!', '🦇 Modo morcego!'],
+    wall: [
+      'Atravessar paredes só fantasma consegue.',
+      'Bateu na lápide do sandbox.',
+      'Erro 403: o portão do cemitério estava fechado.'
+    ],
+    self: [
+      'Maldição recursiva: mordeu o próprio rabo.',
+      'Possuída por si mesma.',
+      'Feitiço circular detectado.'
+    ],
+    caught: [
+      'A assombração te pegou! Buuu!',
+      'O Claude Code fantasma te arrastou para o além.',
+      'Capturado pela abóbora: PR amaldiçoado.'
+    ]
+  };
+
   const CAUGHT_REASONS = [
     'O Claude Code te alcançou! Código refatorado.',
     'Capturado pelo Claude Code: PR rejeitado.',
@@ -483,6 +540,8 @@
   const ui = {
     score: $('score'), best: $('best'), lvl: $('lvl'),
     menu: $('menu'), menuBest: $('menu-best'),
+    themeLabel: $('theme-label'), menuComment: $('menu-comment'), menuSub: $('menu-sub'),
+    pauseMsg: $('pause-msg'), overTitle: $('over-title'),
     ovPause: $('ov-pause'), ovOver: $('ov-over'),
     overReason: $('over-reason'), overScore: $('over-score'), overBest: $('over-best'), overRecord: $('over-record')
   };
@@ -512,6 +571,29 @@
 
   function storageGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
   function storageSet(key, v) { try { localStorage.setItem(key, v); } catch (e) { /* sem espaço ou bloqueado */ } }
+
+  /* =========================================================
+     MODO / TEMA: 'normal' ou 'halloween' (salvo no localStorage)
+     ========================================================= */
+  const THEME_KEY = 'antigravity-vs-claude-code:modo';
+  let theme = 'normal';
+  const isHalloween = () => theme === 'halloween';
+  // Escolhe a lista de textos do tema atual
+  const themed = (normalList, key) => (isHalloween() ? HALLOWEEN_TEXT[key] : normalList);
+
+  function setTheme(name) {
+    theme = name === 'halloween' ? 'halloween' : 'normal';
+    storageSet(THEME_KEY, theme);
+    const hw = isHalloween();
+    document.body.classList.toggle('halloween', hw);
+    ui.themeLabel.textContent = hw ? 'Halloween 🎃' : 'Normal';
+    ui.menuComment.textContent = hw
+      ? '// v1.2.0 — edição de Halloween 🦇'
+      : '// v1.2.0 — agora com skins e modo Halloween';
+    ui.menuSub.textContent = hw ? 'A disputa assombrada pelo seu terminal' : 'A disputa pelo seu terminal';
+    ui.pauseMsg.textContent = hw ? '// invocando o revisor do PR...' : '// aguardando revisão do PR...';
+    ui.overTitle.textContent = hw ? '💀 Stack overflow!' : 'Stack overflow!';
+  }
 
   function setSkin(group, name) {
     const g = skins[group];
@@ -801,14 +883,14 @@
     const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
 
     // Colisão com a parede
-    if (!inBounds(head)) { gameOver(pick(WALL_REASONS)); return; }
+    if (!inBounds(head)) { gameOver(pick(themed(WALL_REASONS, 'wall'))); return; }
 
     // Durante o contra-ataque não há comida no tabuleiro
     const willEat = !chase && head.x === food.x && head.y === food.y;
 
     // Colisão com o corpo (a ponta da cauda sai do lugar, exceto quando come)
     const body = willEat ? snake : snake.slice(0, -1);
-    if (body.some((s) => s.x === head.x && s.y === head.y)) { gameOver(pick(SELF_REASONS)); return; }
+    if (body.some((s) => s.x === head.x && s.y === head.y)) { gameOver(pick(themed(SELF_REASONS, 'self'))); return; }
 
     // Colisão com a cobra inimiga
     let cutEnemyTail = false;
@@ -933,7 +1015,7 @@
     const nh = { x: chase.segs[0].x + d.x, y: chase.segs[0].y + d.y };
 
     // Pegou a sua cabeça: fim de jogo
-    if (samePos(nh, snake[0])) { gameOver(pick(CAUGHT_REASONS)); return; }
+    if (samePos(nh, snake[0])) { gameOver(pick(themed(CAUGHT_REASONS, 'caught'))); return; }
 
     chase.segs.unshift(nh);
     chase.segs.pop();
@@ -999,12 +1081,14 @@
     const cy = (food.y + 0.5) * cell;
 
     spawnParticles(cx, cy);
-    spawnFloater(pick(EAT_MESSAGES), cx, cy, pick(['#d97757', '#3fb950', '#58a6ff', '#e3b341', '#bc8cff']));
+    spawnFloater(pick(themed(EAT_MESSAGES, 'eat')), cx, cy, pick(isHalloween()
+      ? ['#ff8c1a', '#ffd34d', '#c39bff', '#9be15d']
+      : ['#d97757', '#3fb950', '#58a6ff', '#e3b341', '#bc8cff']));
 
     // A cada 5 comidas, acelera um pouco
     if (eaten % 5 === 0 && delay > MIN_DELAY) {
       delay = Math.max(MIN_DELAY, delay - DELAY_STEP);
-      spawnFloater(pick(SPEED_MESSAGES), size / 2, size * 0.18, '#58a6ff', 1.25);
+      spawnFloater(pick(themed(SPEED_MESSAGES, 'speed')), size / 2, size * 0.18, isHalloween() ? '#c39bff' : '#58a6ff', 1.25);
     }
 
     updateHud();
@@ -1019,7 +1103,9 @@
      EFEITOS: partículas, ondas e textos flutuantes
      ========================================================= */
   function spawnParticles(x, y) {
-    const colors = ['#d97757', '#f0a07f', '#e3b341', '#ffffff', '#ffb38a'];
+    const colors = isHalloween()
+      ? ['#ff8c1a', '#ffd34d', '#c39bff', '#9be15d', '#ffffff']
+      : ['#d97757', '#f0a07f', '#e3b341', '#ffffff', '#ffb38a'];
     for (let i = 0; i < 26; i++) {
       const a = rand(0, Math.PI * 2);
       const sp = rand(0.04, 0.22) * cell;
@@ -1035,7 +1121,15 @@
   }
 
   function spawnFloater(text, x, y, color, scale = 1) {
-    floaters.push({ text, x, y, color, scale, life: 0, max: 1300 });
+    // Desvia de mensagens recentes que estejam na mesma altura (evita texto em cima de texto)
+    const lineH = Math.max(26, cell * 1.2) * scale;
+    const shownY = (f) => f.y - easeOut(f.life / f.max) * cell * 2.6;
+    for (let tries = 0; tries < 5; tries++) {
+      const clash = floaters.some((f) => f.life < 900 && Math.abs(shownY(f) - y) < lineH);
+      if (!clash) break;
+      y += lineH;
+    }
+    floaters.push({ text, x, y, color, scale, life: 0, max: 1900 });
   }
 
   function updateEffects(dt) {
@@ -1067,11 +1161,14 @@
      DESENHO
      ========================================================= */
   function drawBoard() {
-    ctx.fillStyle = '#0d1117';
+    const hw = isHalloween();
+    ctx.fillStyle = hw ? '#0f0a14' : '#0d1117';
     ctx.fillRect(0, 0, size, size);
 
+    if (hw) drawHalloweenBackdrop();
+
     // Grade sutil
-    ctx.strokeStyle = 'rgba(48, 54, 61, 0.45)';
+    ctx.strokeStyle = hw ? 'rgba(110, 70, 140, 0.28)' : 'rgba(48, 54, 61, 0.45)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (let i = 1; i < COLS; i++) {
@@ -1087,6 +1184,149 @@
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     for (let y = 0; y < ROWS; y++) ctx.fillText(String(y + 1), cell * 0.08, (y + 0.5) * cell);
+
+    if (hw) drawBats();
+  }
+
+  /* =========================================================
+     CENÁRIO DE HALLOWEEN: lua, teia, névoa e morcegos
+     ========================================================= */
+  function drawHalloweenBackdrop() {
+    // Lua cheia com brilho
+    const mx = size * 0.84, my = size * 0.14, mr = size * 0.075;
+    ctx.save();
+    ctx.shadowColor = 'rgba(255, 220, 150, 0.5)';
+    ctx.shadowBlur = mr * 1.5;
+    ctx.fillStyle = 'rgba(255, 233, 180, 0.16)';
+    ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = 'rgba(15, 10, 20, 0.35)'; // crateras
+    ctx.beginPath(); ctx.arc(mx - mr * 0.3, my - mr * 0.2, mr * 0.18, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(mx + mr * 0.35, my + mr * 0.25, mr * 0.12, 0, Math.PI * 2); ctx.fill();
+
+    // Teia de aranha no canto superior esquerdo
+    const wr = size * 0.2;
+    ctx.strokeStyle = 'rgba(210, 200, 230, 0.13)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i <= 5; i++) {
+      const a = (i / 5) * (Math.PI / 2);
+      ctx.moveTo(0, 0);
+      ctx.lineTo(Math.cos(a) * wr, Math.sin(a) * wr);
+    }
+    for (let k = 1; k <= 4; k++) {
+      const r = (k / 4) * wr;
+      for (let i = 0; i < 5; i++) {
+        const a1 = (i / 5) * (Math.PI / 2), a2 = ((i + 1) / 5) * (Math.PI / 2);
+        const am = (a1 + a2) / 2, rm = r * 0.86; // fios "caídos" entre os raios
+        ctx.moveTo(Math.cos(a1) * r, Math.sin(a1) * r);
+        ctx.quadraticCurveTo(Math.cos(am) * rm, Math.sin(am) * rm, Math.cos(a2) * r, Math.sin(a2) * r);
+      }
+    }
+    ctx.stroke();
+
+    // Aranhazinha descendo e subindo pelo fio
+    const sy = wr * 0.9 + Math.sin(time / 900) * size * 0.05;
+    const sx = wr * 0.62;
+    ctx.beginPath(); ctx.moveTo(sx, wr * 0.55); ctx.lineTo(sx, sy); ctx.stroke();
+    ctx.fillStyle = 'rgba(200, 180, 230, 0.35)';
+    ctx.beginPath(); ctx.arc(sx, sy, Math.max(2, cell * 0.14), 0, Math.PI * 2); ctx.fill();
+
+    // Névoa roxa passando devagar no rodapé
+    for (let i = 0; i < 2; i++) {
+      const fx = ((time / (60 + i * 25)) % (size * 1.6)) - size * 0.3;
+      const fy = size * (0.86 + i * 0.07);
+      const g = ctx.createRadialGradient(fx, fy, 0, fx, fy, size * 0.45);
+      g.addColorStop(0, 'rgba(150, 90, 210, 0.13)');
+      g.addColorStop(1, 'rgba(150, 90, 210, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, size, size);
+    }
+  }
+
+  // Morcegos cruzando o céu (posições calculadas pelo tempo, sem estado)
+  function drawBats() {
+    ctx.fillStyle = 'rgba(20, 10, 28, 0.75)';
+    ctx.strokeStyle = 'rgba(195, 155, 255, 0.35)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+      const speed = 0.018 + i * 0.006;
+      const span = size + cell * 4;
+      const x = ((time * speed + i * span * 0.27) % span) - cell * 2;
+      const y = size * (0.12 + i * 0.2) + Math.sin(time / 500 + i) * cell * 0.8;
+      const w = cell * (0.55 + (i % 2) * 0.2);
+      const flap = Math.sin(time / 90 + i * 2) * 0.6; // bater de asas
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.quadraticCurveTo(x - w * 0.5, y - w * (0.5 + flap), x - w, y - w * 0.1 * flap);
+      ctx.quadraticCurveTo(x - w * 0.55, y + w * 0.05, x, y + w * 0.2);
+      ctx.quadraticCurveTo(x + w * 0.55, y + w * 0.05, x + w, y - w * 0.1 * flap);
+      ctx.quadraticCurveTo(x + w * 0.5, y - w * (0.5 + flap), x, y);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  // Chapéu de bruxa: base (aba) centrada em (cx, baseY), largura w
+  function paintWitchHat(c, cx, baseY, w) {
+    c.save();
+    c.translate(cx, baseY);
+    c.rotate(-0.18);
+    c.lineJoin = 'round';
+    c.strokeStyle = '#8a5cc2';
+    c.lineWidth = Math.max(1, w * 0.04);
+    // Cone com a ponta torta
+    c.fillStyle = '#2a1638';
+    c.beginPath();
+    c.moveTo(-w * 0.32, 0);
+    c.quadraticCurveTo(-w * 0.12, -w * 0.5, w * 0.08, -w * 0.82);
+    c.quadraticCurveTo(w * 0.22, -w * 0.62, w * 0.36, -w * 0.64);
+    c.quadraticCurveTo(w * 0.18, -w * 0.4, w * 0.32, 0);
+    c.closePath();
+    c.fill(); c.stroke();
+    // Faixa laranja
+    c.fillStyle = '#ff8c1a';
+    c.fillRect(-w * 0.3, -w * 0.16, w * 0.6, w * 0.1);
+    // Aba
+    c.fillStyle = '#2a1638';
+    c.beginPath();
+    c.ellipse(0, 0, w * 0.55, w * 0.12, 0, 0, Math.PI * 2);
+    c.fill(); c.stroke();
+    c.restore();
+  }
+
+  // Abóbora com ">_" entalhado e brilhando (comida clássica no modo Halloween)
+  function paintPumpkin(c, cx, cy, s) {
+    c.save();
+    c.shadowColor = 'rgba(255, 140, 26, 0.85)';
+    c.shadowBlur = s * 0.7;
+    const g = c.createRadialGradient(cx - s * 0.15, cy - s * 0.15, s * 0.05, cx, cy, s * 0.6);
+    g.addColorStop(0, '#ffb04d');
+    g.addColorStop(1, '#d9620b');
+    c.fillStyle = g;
+    // Três gomos
+    c.beginPath(); c.ellipse(cx - s * 0.2, cy + s * 0.04, s * 0.3, s * 0.42, 0, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.ellipse(cx + s * 0.2, cy + s * 0.04, s * 0.3, s * 0.42, 0, 0, Math.PI * 2); c.fill();
+    c.beginPath(); c.ellipse(cx, cy + s * 0.04, s * 0.3, s * 0.45, 0, 0, Math.PI * 2); c.fill();
+    c.restore();
+    // Linhas dos gomos
+    c.strokeStyle = 'rgba(140, 60, 0, 0.55)';
+    c.lineWidth = Math.max(1, s * 0.03);
+    c.beginPath(); c.ellipse(cx, cy + s * 0.04, s * 0.17, s * 0.43, 0, 0, Math.PI * 2); c.stroke();
+    // Cabinho
+    c.fillStyle = '#4f7a28';
+    c.fillRect(cx - s * 0.05, cy - s * 0.52, s * 0.1, s * 0.16);
+    // Rosto entalhado ">_" com luz amarela por dentro
+    c.save();
+    c.shadowColor = '#ffd34d';
+    c.shadowBlur = s * 0.35;
+    c.fillStyle = '#ffe680';
+    c.font = `900 ${s * 0.44}px ui-monospace, Consolas, monospace`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    const blink = Math.floor(time / 450) % 2 === 0;
+    c.fillText(blink ? '>_' : '> ', cx, cy + s * 0.08);
+    c.restore();
   }
 
   function drawFood() {
@@ -1128,10 +1368,16 @@
   // name: qual skin desenhar (padrão = a escolhida pelo jogador)
   function paintFoodIcon(c, cx, cy, s, name = skins.food.name) {
     const img = skins.food.img;
+    if (name === 'custom' && !img) { paintPlaceholder(c, cx, cy, s, 0.26); return; }
+
+    // Halloween: o clássico vira abóbora; as outras skins ganham chapéu de bruxa
+    if (isHalloween() && name === 'classic') { paintPumpkin(c, cx, cy, s); return; }
+
     if (name === 'buddy') paintBuddy(c, cx, cy, s);
-    else if (name === 'custom' && img) paintCustom(c, cx, cy, s, img);
-    else if (name === 'custom') paintPlaceholder(c, cx, cy, s, 0.26);
+    else if (name === 'custom') paintCustom(c, cx, cy, s, img);
     else paintClassic(c, cx, cy, s);
+
+    if (isHalloween()) paintWitchHat(c, cx + s * 0.08, cy - s * 0.42, s * 0.85);
   }
 
   // Cartão "sua imagem" ainda sem imagem: quadrado tracejado com "+"
@@ -1262,8 +1508,11 @@
     view.querySelectorAll('canvas.pv').forEach((cv) => {
       const [group, name] = cv.dataset.pv.split(':');
       drawPreviewOn(cv, (c, w) => {
-        if (group === 'snake') paintHead(c, w / 2, w / 2, w * 0.6, 1, 0, name || skins.snake.name);
-        else paintFoodIcon(c, w / 2, w / 2, w * 0.58, name || skins.food.name);
+        // No Halloween, desce e encolhe um pouco para o chapéu de bruxa caber
+        const hw = isHalloween();
+        const cy = hw ? w * 0.6 : w / 2, k = hw ? 0.82 : 1;
+        if (group === 'snake') paintHead(c, w / 2, cy, w * 0.6 * k, 1, 0, name || skins.snake.name);
+        else paintFoodIcon(c, w / 2, cy, w * 0.58 * k, name || skins.food.name);
       });
     });
   }
@@ -1280,7 +1529,9 @@
     for (let i = n - 1; i >= 1; i--) {
       const t = i / Math.max(1, n - 1);              // 0 = perto da cabeça, 1 = cauda
       // Skin estrela: azul → roxo; demais: azul → verde-água
-      const hue = skins.snake.name === 'star' ? lerp(220, 290, t) : lerp(205, 150, t);
+      // Halloween: laranja → roxo; estrela: azul → roxo; padrão: azul → verde-água
+      let hue = skins.snake.name === 'star' ? lerp(220, 290, t) : lerp(205, 150, t);
+      if (isHalloween()) hue = (lerp(30, -85, t) + 360) % 360;
       const a = lerp(0.95, 0.3, t);                  // vai sumindo até a cauda
       const s = cell * lerp(0.82, 0.55, t);
       const color = `hsla(${hue}, 75%, ${lerp(60, 47, t)}%, ${a})`;
@@ -1318,8 +1569,11 @@
     const img = skins.snake.img;
     if (name === 'star') paintHeadStar(c, cx, cy, cell, dx, dy);
     else if (name === 'custom' && img) paintHeadCustom(c, cx, cy, cell, img);
-    else if (name === 'custom') paintPlaceholder(c, cx, cy, cell * 1.1, 0.5);
+    else if (name === 'custom') { paintPlaceholder(c, cx, cy, cell * 1.1, 0.5); return; }
     else paintHeadClassic(c, cx, cy, cell, dx, dy);
+
+    // Halloween: chapéu de bruxa na cabeça da cobra
+    if (isHalloween()) paintWitchHat(c, cx + cell * 0.06, cy - cell * 0.4, cell * 0.95);
   }
 
   // Olhinhos que olham na direção (dx, dy)
@@ -1478,22 +1732,50 @@
     }
     ctx.restore();
 
-    // Textos flutuantes subindo e sumindo
+    // Textos flutuantes: GRANDES, com "pop" de entrada, contorno grosso e brilho
+    // (pensados para ler de longe, num projetor)
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (const f of floaters) {
       const t = f.life / f.max;
-      const fs = Math.max(12, cell * 0.5) * f.scale * (t < 0.15 ? lerp(0.6, 1, t / 0.15) : 1);
-      ctx.font = `bold ${fs}px ui-monospace, Consolas, monospace`;
-      const w = ctx.measureText(f.text).width;
-      const x = Math.min(Math.max(f.x, w / 2 + 6), size - w / 2 - 6);
-      const y = Math.max(fs, f.y - easeOut(t) * cell * 2.2);
-      ctx.globalAlpha = t > 0.6 ? 1 - (t - 0.6) / 0.4 : 1;
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = 'rgba(13, 17, 23, 0.9)';
+
+      // Pop: cresce rápido, passa um pouco do tamanho e assenta
+      let pop = 1;
+      if (t < 0.1) pop = lerp(0.3, 1.18, t / 0.1);
+      else if (t < 0.2) pop = lerp(1.18, 1, (t - 0.1) / 0.1);
+
+      let fs = Math.max(20, cell * 1.0) * f.scale * pop;
+      ctx.font = `900 ${fs}px ui-monospace, Consolas, monospace`;
+      let w = ctx.measureText(f.text).width;
+      // Se não couber no tabuleiro, encolhe só o necessário
+      if (w > size * 0.94) {
+        fs *= (size * 0.94) / w;
+        ctx.font = `900 ${fs}px ui-monospace, Consolas, monospace`;
+        w = ctx.measureText(f.text).width;
+      }
+      const x = Math.min(Math.max(f.x, w / 2 + 8), size - w / 2 - 8);
+      const y = Math.min(size - fs, Math.max(fs * 0.8, f.y - easeOut(t) * cell * 2.6));
+
+      ctx.globalAlpha = t > 0.7 ? 1 - (t - 0.7) / 0.3 : 1;
+
+      // Contorno escuro grosso (legível sobre qualquer fundo)
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = Math.max(5, fs * 0.22);
+      ctx.strokeStyle = 'rgba(13, 17, 23, 0.95)';
       ctx.strokeText(f.text, x, y);
+
+      // Preenchimento com brilho na cor da mensagem
+      ctx.save();
+      ctx.shadowColor = f.color;
+      ctx.shadowBlur = fs * 0.6;
       ctx.fillStyle = f.color;
       ctx.fillText(f.text, x, y);
+      ctx.restore();
+
+      // Leve reflexo branco por cima, para "acender" o texto
+      ctx.globalAlpha *= 0.25;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(f.text, x, y - fs * 0.04);
       ctx.globalAlpha = 1;
     }
   }
@@ -1525,7 +1807,10 @@
     for (let i = n - 1; i >= 1; i--) {
       const t = i / Math.max(1, n - 1);
       const s = cell * lerp(0.8, 0.6, t);
-      const color = `hsla(16, 68%, ${lerp(58, 42, t)}%, ${lerp(0.95, 0.6, t)})`;
+      // Halloween: corpo de assombração (lilás translúcido); normal: terracota
+      const color = isHalloween()
+        ? `hsla(270, 45%, ${lerp(78, 55, t)}%, ${lerp(0.75, 0.3, t)})`
+        : `hsla(16, 68%, ${lerp(58, 42, t)}%, ${lerp(0.95, 0.6, t)})`;
       ctx.strokeStyle = color;
       ctx.lineWidth = s * 0.78;
       ctx.lineCap = 'round';
@@ -1563,9 +1848,11 @@
     const pop = e.phase === 'warn' ? easeOut(Math.min(1, (WARN_TIME - e.warn) / 400)) : 1;
     const pulse = 0.5 + 0.5 * Math.sin(time / 120);
     ctx.save();
-    ctx.shadowColor = 'rgba(248, 81, 73, 0.9)';
+    ctx.shadowColor = isHalloween() ? 'rgba(155, 225, 93, 0.9)' : 'rgba(248, 81, 73, 0.9)';
     ctx.shadowBlur = cell * (0.6 + 0.4 * pulse);
-    ctx.fillStyle = `rgba(248, 81, 73, ${0.22 + 0.15 * pulse})`;
+    ctx.fillStyle = isHalloween()
+      ? `rgba(155, 225, 93, ${0.18 + 0.12 * pulse})`
+      : `rgba(248, 81, 73, ${0.22 + 0.15 * pulse})`;
     ctx.beginPath();
     ctx.arc(h.x, h.y, cell * 0.64 * pop, 0, Math.PI * 2);
     ctx.fill();
@@ -1574,7 +1861,7 @@
     paintFoodIcon(ctx, h.x, h.y, cell * 0.84 * pop);
 
     // Sobrancelhas bravas em "V"
-    if (pop > 0.9) {
+    if (pop > 0.9 && !isHalloween()) { // no Halloween a abóbora/chapéu já assusta o bastante
       ctx.strokeStyle = '#f85149';
       ctx.lineWidth = Math.max(1.5, cell * 0.09);
       ctx.lineCap = 'round';
@@ -1604,8 +1891,9 @@
     const warn = chase.phase === 'warn';
 
     const g = ctx.createRadialGradient(size / 2, size / 2, size * 0.35, size / 2, size / 2, size * 0.75);
-    g.addColorStop(0, 'rgba(248, 81, 73, 0)');
-    g.addColorStop(1, `rgba(248, 81, 73, ${warn ? 0.1 + 0.3 * pulse : 0.1 + 0.08 * pulse})`);
+    const rgb = isHalloween() ? '150, 80, 220' : '248, 81, 73'; // roxo no Halloween, vermelho no normal
+    g.addColorStop(0, `rgba(${rgb}, 0)`);
+    g.addColorStop(1, `rgba(${rgb}, ${warn ? 0.1 + 0.3 * pulse : 0.1 + 0.08 * pulse})`);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, size, size);
 
@@ -1618,14 +1906,15 @@
       const by = size / 2 - bh / 2;
       ctx.fillStyle = 'rgba(13, 17, 23, 0.88)';
       ctx.fillRect(0, by, size, bh);
-      ctx.fillStyle = `rgba(248, 81, 73, ${0.6 + 0.4 * pulse})`;
+      const alertRgb = isHalloween() ? '255, 140, 26' : '248, 81, 73';
+      ctx.fillStyle = `rgba(${alertRgb}, ${0.6 + 0.4 * pulse})`;
       ctx.fillRect(0, by, size, Math.max(2, cell * 0.08));
       ctx.fillRect(0, by + bh - Math.max(2, cell * 0.08), size, Math.max(2, cell * 0.08));
 
-      const t1 = '⚠ O CLAUDE CODE VIROU A COBRA!';
+      const t1 = isHalloween() ? '👻 O CLAUDE CODE VIROU ASSOMBRAÇÃO!' : '⚠ O CLAUDE CODE VIROU A COBRA!';
       fitFont(t1, size * 0.9, Math.max(14, cell * 0.66));
       ctx.globalAlpha = 0.65 + 0.35 * pulse;
-      ctx.fillStyle = '#f85149';
+      ctx.fillStyle = isHalloween() ? '#ff8c1a' : '#f85149';
       ctx.fillText(t1, size / 2, by + bh * 0.38);
       ctx.globalAlpha = 1;
 
@@ -1652,7 +1941,7 @@
     ctx.lineWidth = 4;
     ctx.strokeStyle = 'rgba(13, 17, 23, 0.9)';
     ctx.strokeText(label, size / 2, by + bhh + cell * 0.42);
-    ctx.fillStyle = '#f85149';
+    ctx.fillStyle = isHalloween() ? '#ff8c1a' : '#f85149';
     ctx.fillText(label, size / 2, by + bhh + cell * 0.42);
   }
 
@@ -1785,6 +2074,7 @@
       const action = b.dataset.action;
       if (action === 'play') startGame();
       else if (action === 'back') setMenuView('main');
+      else if (action === 'theme') setTheme(isHalloween() ? 'normal' : 'halloween');
       else setMenuView(action); // 'skins' ou 'howto'
     });
   });
@@ -1822,6 +2112,9 @@
       reader.readAsDataURL(file);
     });
   });
+
+  // Restaura o modo salvo
+  setTheme(storageGet(THEME_KEY) || 'normal');
 
   // Restaura as skins salvas
   ['food', 'snake'].forEach((group) => {
