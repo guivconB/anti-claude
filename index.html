@@ -1,0 +1,1506 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Antigravity vs Claude Code</title>
+<style>
+  /* =========================================================
+     TEMA: cores inspiradas em editores de código escuros
+     ========================================================= */
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel2: #1c2129;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --blue: #58a6ff;
+    --green: #3fb950;
+    --orange: #d97757;
+    --red: #f85149;
+    --yellow: #e3b341;
+    --purple: #bc8cff;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", "Fira Code", Consolas, "Liberation Mono", Menlo, monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow: hidden;
+    touch-action: manipulation;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ---------- Barra superior (parece a aba de um editor) ---------- */
+  .topbar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .tab { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+  .tab b { color: var(--text); font-weight: 600; }
+  .dots { display: flex; gap: 6px; }
+  .dots span { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .dots span:nth-child(1) { background: #ff5f57; }
+  .dots span:nth-child(2) { background: #febc2e; }
+  .dots span:nth-child(3) { background: #28c840; }
+
+  .hud { display: flex; gap: 16px; font-size: 13px; color: var(--muted); align-items: center; }
+  .hud .val { color: var(--text); font-weight: 700; }
+  .hud .k-score .val { color: var(--orange); }
+  .hud .k-best .val { color: var(--yellow); }
+  .hud .k-lvl .val { color: var(--blue); }
+
+  /* ---------- Área do jogo ---------- */
+  main {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 16px;
+  }
+  .wrap {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, .55), 0 0 0 1px rgba(88, 166, 255, .04);
+  }
+  canvas { display: block; }
+
+  /* Tremidinha no game over */
+  .wrap.shake { animation: shake .4s ease; }
+  @keyframes shake {
+    0%, 100% { transform: translate(0, 0); }
+    20% { transform: translate(-6px, 3px); }
+    40% { transform: translate(5px, -4px); }
+    60% { transform: translate(-4px, 2px); }
+    80% { transform: translate(3px, -1px); }
+  }
+
+  /* ---------- Telas sobrepostas (início / pausa / game over) ---------- */
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 6%;
+    background: rgba(13, 17, 23, .80);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+  }
+  .overlay.show { display: flex; animation: fadeIn .25s ease; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  /* --s = tamanho do canvas em px (definido via JS) → fontes escalam junto */
+  .card { font-size: clamp(11px, calc(var(--s, 400px) * .033), 22px); max-width: 100%; }
+  .card .comment { color: var(--muted); font-style: italic; margin-bottom: .8em; }
+  .card h1 { font-size: clamp(20px, calc(var(--s, 400px) * .07), 48px); line-height: 1.15; margin-bottom: .3em; }
+  .card h1 .ag {
+    background: linear-gradient(90deg, #4285f4, #34a853, #fbbc05, #ea4335);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .card h1 .vs { color: var(--muted); font-size: .6em; vertical-align: middle; }
+  .card h1 .cc { color: var(--orange); }
+  .card h2 { font-size: clamp(22px, calc(var(--s, 400px) * .085), 56px); color: var(--red); margin-bottom: .2em; }
+  .card .sub { color: var(--blue); margin-bottom: 1.2em; }
+  .card .sub::before { content: "> "; color: var(--green); }
+  .card .err { color: var(--muted); margin-bottom: 1.2em; }
+  .card .stats { margin-bottom: 1.2em; line-height: 1.7; }
+  .card .stats b { color: var(--orange); }
+  .card .stats .best b { color: var(--yellow); }
+  .card .record {
+    display: inline-block; color: var(--bg); background: var(--yellow);
+    padding: .15em .6em; border-radius: 4px; font-weight: 700; margin-bottom: .9em;
+    animation: pulse 1s ease-in-out infinite;
+  }
+  .card .record[hidden] { display: none; }
+  @keyframes pulse { 50% { transform: scale(1.07); } }
+
+  /* =========================================================
+     MENU INICIAL (tela cheia, por cima de tudo)
+     ========================================================= */
+  .menu {
+    position: fixed; inset: 0; z-index: 50;
+    display: none; overflow-y: auto;
+    background:
+      radial-gradient(ellipse 80% 50% at 50% 0%, rgba(88, 166, 255, .10), transparent 70%),
+      radial-gradient(ellipse 60% 40% at 50% 100%, rgba(217, 119, 87, .08), transparent 70%),
+      var(--bg);
+  }
+  .menu.show { display: block; animation: fadeIn .25s ease; }
+  .menu-inner {
+    min-height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; padding: 28px 16px 20px;
+  }
+  .menu-view { display: none; width: 100%; max-width: 560px; text-align: center; }
+  .menu-view.active { display: block; animation: fadeIn .2s ease; }
+
+  .menu .comment { color: var(--muted); font-style: italic; font-size: 13px; margin-bottom: 10px; }
+  .menu .title { font-size: clamp(28px, 7vw, 52px); line-height: 1.1; margin-bottom: 8px; }
+  .menu .title .ag {
+    background: linear-gradient(90deg, #4285f4, #34a853, #fbbc05, #ea4335);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .menu .title .vs { color: var(--muted); font-size: .55em; vertical-align: middle; }
+  .menu .title .cc { color: var(--orange); }
+  .menu .sub { color: var(--blue); font-size: 15px; margin-bottom: 22px; }
+  .menu .sub::before { content: "> "; color: var(--green); }
+
+  /* "Lutadores": prévia da cobra e da comida com as skins atuais */
+  .versus { display: flex; align-items: center; justify-content: center; gap: 18px; margin-bottom: 26px; }
+  .fighter { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); line-height: 1.4; }
+  .fighter b { color: var(--text); font-size: 13px; }
+  .fighter canvas {
+    width: 84px; height: 84px; display: block;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  }
+  .vs-big { font-size: 22px; font-weight: 900; color: var(--muted); }
+
+  /* Itens do menu, com cursor "> " estilo terminal */
+  .menu-list { display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 320px; margin: 0 auto; }
+  .menu-item {
+    font: inherit; font-size: 16px; cursor: pointer; text-align: left;
+    color: var(--text); background: var(--panel);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 16px; transition: border-color .12s, background .12s, transform .12s;
+  }
+  .menu-item::before { content: "  "; white-space: pre; color: var(--green); }
+  .menu-item:hover, .menu-item:focus-visible {
+    border-color: var(--blue); background: var(--panel2); outline: none; transform: translateX(3px);
+  }
+  .menu-item:hover::before, .menu-item:focus-visible::before { content: "> "; }
+  .menu-item.primary { background: var(--green); color: #0d1117; border-color: var(--green); font-weight: 700; }
+  .menu-item.primary::before { color: #0d1117; }
+  .menu-item.primary:hover, .menu-item.primary:focus-visible { background: #4cc764; border-color: #4cc764; }
+  .menu-item.back { margin-top: 22px; text-align: center; min-width: 180px; }
+  .menu-best { margin-top: 18px; color: var(--muted); font-size: 13px; }
+  .menu-best b { color: var(--yellow); }
+
+  .menu-h { font-size: 26px; margin-bottom: 6px; }
+  .menu-note { color: var(--muted); font-size: 12px; }
+  .group-h { color: var(--muted); font-weight: 400; font-style: italic; font-size: 14px; text-align: left; margin: 20px 0 8px; }
+
+  /* Cartões de skin */
+  .skin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .skin-card {
+    font: inherit; cursor: pointer; color: var(--muted); position: relative;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 6px 10px; display: flex; flex-direction: column; align-items: center; gap: 6px;
+    transition: border-color .12s, transform .12s, background .12s;
+  }
+  .skin-card canvas { width: 72px; height: 72px; display: block; }
+  .skin-card span { font-size: 13px; }
+  .skin-card small { font-size: 10px; opacity: .75; min-height: 1.2em; }
+  .skin-card:hover, .skin-card:focus-visible { border-color: var(--blue); color: var(--text); outline: none; transform: translateY(-2px); }
+  .skin-card.active { border-color: var(--orange); color: var(--orange); background: rgba(217, 119, 87, .08); }
+  .skin-card.active::after { content: "✓"; position: absolute; top: 6px; right: 9px; font-size: 13px; font-weight: 700; color: var(--orange); }
+
+  .howto { text-align: left; list-style: none; display: grid; gap: 12px; margin: 18px auto 0; max-width: 440px; font-size: 14px; color: var(--muted); line-height: 1.5; }
+  .howto li b { color: var(--text); }
+  .menu-foot { margin-top: 26px; font-size: 11px; color: var(--muted); opacity: .7; }
+
+  @media (max-width: 420px) {
+    .skin-card canvas { width: 54px; height: 54px; }
+    .skin-card span { font-size: 12px; }
+    .fighter canvas { width: 70px; height: 70px; }
+    .versus { gap: 10px; }
+  }
+
+  /* Botão secundário (Menu) nas telas de pausa / game over */
+  .btn.ghost {
+    background: transparent; color: var(--text);
+    border: 1px solid var(--border); box-shadow: none; margin-left: .5em;
+  }
+  .btn.ghost:active { transform: translateY(1px); box-shadow: none; }
+
+  .btn {
+    font: inherit; font-weight: 700; cursor: pointer;
+    background: var(--green); color: #0d1117;
+    border: 0; border-radius: 6px; padding: .6em 1.4em;
+    box-shadow: 0 4px 0 #238636; transition: transform .08s, box-shadow .08s;
+  }
+  .btn:hover { filter: brightness(1.1); }
+  .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 #238636; }
+  .hint { margin-top: 1.1em; color: var(--muted); font-size: .85em; }
+  kbd {
+    font: inherit; font-size: .9em; padding: .05em .4em; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--panel2); color: var(--text);
+  }
+
+  /* ---------- Controles na tela (celular) ---------- */
+  .controls {
+    display: none;
+    grid-template-columns: repeat(3, 58px);
+    grid-template-rows: repeat(3, 50px);
+    grid-template-areas: ". up ." "left mid right" ". down .";
+    gap: 6px;
+    padding: 4px 0 8px;
+  }
+  .controls button {
+    font: inherit; font-size: 20px; color: var(--text);
+    background: var(--panel2); border: 1px solid var(--border); border-radius: 10px;
+    touch-action: none;
+  }
+  .controls button:active { background: #2d333b; border-color: var(--blue); }
+  .controls .up { grid-area: up; }
+  .controls .down { grid-area: down; }
+  .controls .left { grid-area: left; }
+  .controls .right { grid-area: right; }
+  .controls .mid { grid-area: mid; font-size: 14px; color: var(--muted); }
+
+  /* Mostra os botões em telas de toque ou estreitas */
+  @media (pointer: coarse), (max-width: 700px) {
+    .controls { display: grid; }
+  }
+
+  footer {
+    font-size: 11px;
+    color: var(--muted);
+    opacity: .7;
+    padding: 4px 16px 10px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+  <!-- Barra superior: "aba" do arquivo + placar -->
+  <header class="topbar">
+    <div class="tab">
+      <div class="dots"><span></span><span></span><span></span></div>
+      <span><b>antigravity.snake</b> — ~/guerra-das-ias</span>
+    </div>
+    <div class="hud">
+      <span class="k-score">pontos: <span class="val" id="score">0</span></span>
+      <span class="k-best">recorde: <span class="val" id="best">0</span></span>
+      <span class="k-lvl">vel: <span class="val" id="lvl">1</span></span>
+    </div>
+  </header>
+
+  <main id="main">
+    <div class="wrap" id="wrap">
+      <canvas id="game" aria-label="Jogo da cobrinha: Antigravity vs Claude Code"></canvas>
+
+      <!-- Tela de pausa -->
+      <div class="overlay" id="ov-pause">
+        <div class="card">
+          <h1>⏸ Pausado</h1>
+          <p class="err">// aguardando revisão do PR...</p>
+          <button class="btn" id="btn-resume">▶ Continuar</button>
+          <button class="btn ghost" id="btn-menu-pause">☰ Menu</button>
+          <p class="hint"><kbd>P</kbd> / <kbd>Espaço</kbd> para voltar · <kbd>M</kbd> menu</p>
+        </div>
+      </div>
+
+      <!-- Tela de game over -->
+      <div class="overlay" id="ov-over">
+        <div class="card">
+          <h2>Stack overflow!</h2>
+          <p class="err" id="over-reason">Exception in thread "main"</p>
+          <div class="record" id="over-record" hidden>★ NOVO RECORDE ★</div>
+          <div class="stats">
+            <div>Claude Codes consumidos: <b id="over-score">0</b></div>
+            <div class="best">Recorde: <b id="over-best">0</b></div>
+          </div>
+          <button class="btn" id="btn-restart">↻ Jogar de novo</button>
+          <button class="btn ghost" id="btn-menu-over">☰ Menu</button>
+          <p class="hint"><kbd>Enter</kbd> / <kbd>Espaço</kbd> reiniciar · <kbd>M</kbd> menu</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- =========================================================
+       MENU INICIAL (tela cheia)
+       ========================================================= -->
+  <div class="menu show" id="menu">
+    <div class="menu-inner">
+
+      <!-- Tela principal do menu -->
+      <section class="menu-view active" data-view="main">
+        <div class="comment">// v1.1.0 — agora com skins</div>
+        <h1 class="title"><span class="ag">Antigravity</span> <span class="vs">vs</span> <span class="cc">Claude Code</span></h1>
+        <p class="sub">A disputa pelo seu terminal</p>
+
+        <div class="versus">
+          <div class="fighter"><canvas class="pv" data-pv="snake"></canvas><span>você<br><b>Antigravity</b></span></div>
+          <div class="vs-big">VS</div>
+          <div class="fighter"><canvas class="pv" data-pv="food"></canvas><span>comida<br><b>Claude Code</b></span></div>
+        </div>
+
+        <nav class="menu-list">
+          <button class="menu-item primary" data-action="play">▶ Jogar</button>
+          <button class="menu-item" data-action="skins">🎨 Skins</button>
+          <button class="menu-item" data-action="howto">❔ Como jogar</button>
+        </nav>
+        <p class="menu-best">recorde: <b id="menu-best">0</b></p>
+      </section>
+
+      <!-- Tela de skins -->
+      <section class="menu-view" data-view="skins">
+        <h2 class="menu-h">🎨 Skins</h2>
+        <p class="menu-note">Clique para escolher. A escolha fica salva neste navegador.</p>
+
+        <h3 class="group-h">// cobra (você)</h3>
+        <div class="skin-grid">
+          <button class="skin-card" data-group="snake" data-skin="classic">
+            <canvas class="pv" data-pv="snake:classic"></canvas><span>AG clássico</span><small>padrão</small>
+          </button>
+          <button class="skin-card" data-group="snake" data-skin="star">
+            <canvas class="pv" data-pv="snake:star"></canvas><span>estrela ✦</span><small>azul / roxo</small>
+          </button>
+          <button class="skin-card" data-group="snake" data-skin="custom">
+            <canvas class="pv" data-pv="snake:custom"></canvas><span>sua imagem</span><small class="custom-hint">escolher arquivo</small>
+          </button>
+        </div>
+        <input type="file" id="skin-file-snake" accept="image/*" hidden>
+
+        <h3 class="group-h">// comida (Claude Code)</h3>
+        <div class="skin-grid">
+          <button class="skin-card" data-group="food" data-skin="classic">
+            <canvas class="pv" data-pv="food:classic"></canvas><span>&gt;_ clássico</span><small>padrão</small>
+          </button>
+          <button class="skin-card" data-group="food" data-skin="buddy">
+            <canvas class="pv" data-pv="food:buddy"></canvas><span>buddy pixel</span><small>pixel art</small>
+          </button>
+          <button class="skin-card" data-group="food" data-skin="custom">
+            <canvas class="pv" data-pv="food:custom"></canvas><span>sua imagem</span><small class="custom-hint">escolher arquivo</small>
+          </button>
+        </div>
+        <input type="file" id="skin-file-food" accept="image/*" hidden>
+
+        <button class="menu-item back" data-action="back">← Voltar</button>
+      </section>
+
+      <!-- Tela de instruções -->
+      <section class="menu-view" data-view="howto">
+        <h2 class="menu-h">❔ Como jogar</h2>
+        <ul class="howto">
+          <li><b>Objetivo:</b> comer o máximo de Claude Codes. Cada um faz a cobra crescer.</li>
+          <li><b>Mover:</b> <kbd>←↑↓→</kbd> ou <kbd>WASD</kbd>. No celular, use os botões ou deslize o dedo.</li>
+          <li><b>Pausar:</b> <kbd>P</kbd> ou <kbd>Espaço</kbd>. <kbd>M</kbd> volta ao menu.</li>
+          <li><b>Cuidado:</b> bater na parede ou no próprio corpo é game over.</li>
+          <li><b>Pegadinha:</b> a cada 2 segundos o Claude Code foge uma casa para longe de você.</li>
+          <li><b>Velocidade:</b> aumenta a cada 5 itens comidos.</li>
+        </ul>
+        <button class="menu-item back" data-action="back">← Voltar</button>
+      </section>
+
+      <p class="menu-foot">Paródia educacional. Sem afiliação com Google ou Anthropic.</p>
+    </div>
+  </div>
+
+  <!-- Controles para celular -->
+  <div class="controls" id="controls">
+    <button class="up" data-dir="up" aria-label="Cima">▲</button>
+    <button class="left" data-dir="left" aria-label="Esquerda">◀</button>
+    <button class="mid" id="btn-pause" aria-label="Pausar">⏸</button>
+    <button class="right" data-dir="right" aria-label="Direita">▶</button>
+    <button class="down" data-dir="down" aria-label="Baixo">▼</button>
+  </div>
+
+  <footer>Paródia educacional. Sem afiliação com Google ou Anthropic.</footer>
+
+<script>
+(() => {
+  'use strict';
+
+  /* =========================================================
+     CONFIGURAÇÕES GERAIS
+     ========================================================= */
+  const COLS = 20;              // largura da grade
+  const ROWS = 20;              // altura da grade
+  const BASE_DELAY = 150;       // ms entre passos no início
+  const MIN_DELAY = 60;         // velocidade máxima (ms por passo)
+  const DELAY_STEP = 12;        // quanto acelera a cada 5 comidas
+  const FLEE_INTERVAL = 2000;   // a comida tenta fugir a cada 2 s
+  const STORAGE_KEY = 'antigravity-vs-claude-code:recorde';
+  const SKIN_KEY = 'antigravity-vs-claude-code:skin';
+  const SKIN_IMG_KEY = 'antigravity-vs-claude-code:skin-img';
+  const SNAKE_SKIN_KEY = 'antigravity-vs-claude-code:skin-cobra';
+  const SNAKE_IMG_KEY = 'antigravity-vs-claude-code:skin-cobra-img';
+
+  // Mensagens ao comer um Claude Code
+  const EAT_MESSAGES = [
+    '+1 token consumido!', 'Contexto expandido!', 'Refatorando...', 'Deploy concluído!',
+    'Testes passando ✓', 'Merge sem conflitos!', 'Cache hit!', 'Compilou de primeira?!',
+    'LGTM!', 'Bug virou feature!', 'git commit -m "agora vai"', 'Prompt aceito!',
+    'rm -rf bugs/', 'Lint sem warnings!', 'Hotfix em produção!', '+1 estrela no repo!'
+  ];
+  const SPEED_MESSAGES = ['⚡ Overclock ativado!', '⚡ Velocidade aumentada!', '⚡ Turbo mode!'];
+
+  // Motivos de game over
+  const WALL_REASONS = [
+    'Bateu na parede do sandbox.',
+    'Erro 403: saiu da área permitida.',
+    'Segmentation fault (core dumped).'
+  ];
+  const SELF_REASONS = [
+    'Recursão infinita: mordeu o próprio rabo.',
+    'Dependência circular detectada.',
+    'Deadlock: a cobra travou em si mesma.'
+  ];
+
+  /* =========================================================
+     ELEMENTOS DA PÁGINA
+     ========================================================= */
+  const $ = (id) => document.getElementById(id);
+  const canvas = $('game');
+  const ctx = canvas.getContext('2d');
+  const wrap = $('wrap');
+  const mainEl = $('main');
+  const ui = {
+    score: $('score'), best: $('best'), lvl: $('lvl'),
+    menu: $('menu'), menuBest: $('menu-best'),
+    ovPause: $('ov-pause'), ovOver: $('ov-over'),
+    overReason: $('over-reason'), overScore: $('over-score'), overBest: $('over-best'), overRecord: $('over-record')
+  };
+
+  /* =========================================================
+     RECORDE (localStorage protegido com try/catch)
+     ========================================================= */
+  function loadBest() {
+    try { return parseInt(localStorage.getItem(STORAGE_KEY), 10) || 0; }
+    catch (e) { return 0; }
+  }
+  function saveBest(value) {
+    try { localStorage.setItem(STORAGE_KEY, String(value)); }
+    catch (e) { /* modo privado ou bloqueado: segue sem salvar */ }
+  }
+
+  /* =========================================================
+     SKINS (salvas no localStorage, com try/catch)
+     food:  'classic' | 'buddy' | 'custom'
+     snake: 'classic' | 'star'  | 'custom'
+     img = imagem escolhida pelo jogador (já reduzida)
+     ========================================================= */
+  const skins = {
+    food:  { name: 'classic', img: null, key: SKIN_KEY, imgKey: SKIN_IMG_KEY },
+    snake: { name: 'classic', img: null, key: SNAKE_SKIN_KEY, imgKey: SNAKE_IMG_KEY }
+  };
+
+  function storageGet(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+  function storageSet(key, v) { try { localStorage.setItem(key, v); } catch (e) { /* sem espaço ou bloqueado */ } }
+
+  function setSkin(group, name) {
+    const g = skins[group];
+    if (name === 'custom' && !g.img) name = 'classic';
+    g.name = name;
+    storageSet(g.key, name);
+    document.querySelectorAll(`.skin-card[data-group="${group}"]`)
+      .forEach((b) => b.classList.toggle('active', b.dataset.skin === name));
+    // Texto do cartão "sua imagem": escolher ou trocar
+    const hint = document.querySelector(`.skin-card[data-group="${group}"][data-skin="custom"] .custom-hint`);
+    if (hint) hint.textContent = g.img ? 'clique para trocar' : 'escolher arquivo';
+  }
+
+  // Carrega uma imagem a partir de um dataURL e chama cb(img) quando pronta
+  function loadImage(src, cb) {
+    const img = new Image();
+    img.onload = () => cb(img);
+    img.onerror = () => cb(null);
+    img.src = src;
+  }
+
+  // Reduz a imagem para 128px (fica leve para salvar no localStorage)
+  function shrinkImage(img) {
+    const max = 128;
+    const k = Math.min(1, max / Math.max(img.width, img.height));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.width * k));
+    c.height = Math.max(1, Math.round(img.height * k));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  /* =========================================================
+     ESTADO DO JOGO
+     ========================================================= */
+  let state = 'start';          // 'start' | 'playing' | 'paused' | 'over'
+  let snake = [];               // lista de {x, y}; índice 0 = cabeça
+  let prevSnake = [];           // posições do passo anterior (para animação suave)
+  let dir = { x: 1, y: 0 };     // direção atual
+  let dirQueue = [];            // fila de comandos (evita perder toques rápidos)
+  let eyeDir = { x: 1, y: 0 };  // direção dos olhos (suavizada)
+  let food = { x: 0, y: 0 };
+  let foodPrev = { x: 0, y: 0 };
+  let foodAnim = 1;             // 0 → 1 durante o deslizar da comida
+  let score = 0;
+  let best = loadBest();
+  let eaten = 0;
+  let delay = BASE_DELAY;
+  let acc = 0;                  // acumulador de tempo entre passos
+  let fleeTimer = 0;
+  let particles = [];
+  let rings = [];
+  let floaters = [];
+  let time = 0;                 // tempo total (para animações)
+
+  // Dimensões (recalculadas no resize)
+  let size = 400, cell = 20, dpr = 1;
+
+  /* =========================================================
+     LAYOUT RESPONSIVO
+     O canvas é sempre quadrado e ocupa o maior espaço disponível.
+     ========================================================= */
+  function resize() {
+    const availW = mainEl.clientWidth - 32;
+    const availH = mainEl.clientHeight - 24;
+    let s = Math.min(availW, availH, 960);
+    s = Math.max(200, Math.floor(s / COLS) * COLS);   // múltiplo de 20 = grade nítida
+    size = s;
+    cell = size / COLS;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    canvas.style.width = size + 'px';
+    canvas.style.height = size + 'px';
+    canvas.width = Math.round(size * dpr);
+    canvas.height = Math.round(size * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    wrap.style.setProperty('--s', size + 'px');
+  }
+  window.addEventListener('resize', resize);
+
+  /* =========================================================
+     UTILITÁRIOS
+     ========================================================= */
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+  const inBounds = (p) => p.x >= 0 && p.y >= 0 && p.x < COLS && p.y < ROWS;
+  const onSnake = (p) => snake.some((s) => s.x === p.x && s.y === p.y);
+  const dist2 = (a, b) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+
+  // Retângulo arredondado (compatível com navegadores sem ctx.roundRect)
+  function roundRectOn(c, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    c.beginPath();
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+  }
+  const roundRect = (x, y, w, h, r) => roundRectOn(ctx, x, y, w, h, r);
+
+  function updateHud() {
+    ui.score.textContent = score;
+    ui.best.textContent = Math.max(best, score);
+    ui.lvl.textContent = 1 + Math.floor(eaten / 5);
+  }
+
+  function showOverlay(which) {
+    [ui.ovPause, ui.ovOver].forEach((o) => o.classList.remove('show'));
+    if (which) which.classList.add('show');
+  }
+
+  /* =========================================================
+     CICLO DE VIDA DA PARTIDA
+     ========================================================= */
+  function reset() {
+    snake = [{ x: 8, y: 10 }, { x: 7, y: 10 }, { x: 6, y: 10 }];
+    prevSnake = snake.map((s) => ({ ...s }));
+    dir = { x: 1, y: 0 };
+    eyeDir = { x: 1, y: 0 };
+    dirQueue = [];
+    score = 0;
+    eaten = 0;
+    delay = BASE_DELAY;
+    acc = 0;
+    fleeTimer = 0;
+    particles = [];
+    rings = [];
+    floaters = [];
+    placeFood();
+    updateHud();
+  }
+
+  function startGame() {
+    reset();
+    state = 'playing';
+    showOverlay(null);
+    ui.menu.classList.remove('show');
+    if (document.activeElement) document.activeElement.blur();
+  }
+
+  /* =========================================================
+     MENU INICIAL
+     ========================================================= */
+  const menuOpen = () => ui.menu.classList.contains('show');
+  let menuView = 'main';
+
+  function setMenuView(name) {
+    menuView = name;
+    ui.menu.querySelectorAll('.menu-view').forEach((v) => v.classList.toggle('active', v.dataset.view === name));
+    ui.menu.scrollTop = 0;
+    // Foca o primeiro botão: dá para navegar só com o teclado
+    const first = ui.menu.querySelector('.menu-view.active .skin-card.active, .menu-view.active .menu-item');
+    if (first) first.focus({ preventScroll: true });
+  }
+
+  function openMenu() {
+    state = 'start';
+    reset();
+    showOverlay(null);
+    ui.menuBest.textContent = best;
+    ui.menu.classList.add('show');
+    setMenuView('main');
+  }
+
+  // Setas / WASD movem o foco entre os botões visíveis do menu
+  function moveMenuFocus(delta) {
+    const items = [...ui.menu.querySelectorAll('.menu-view.active .menu-item, .menu-view.active .skin-card')];
+    if (!items.length) return;
+    const i = items.indexOf(document.activeElement);
+    const next = i < 0 ? 0 : (i + delta + items.length) % items.length;
+    items[next].focus();
+  }
+
+  function handleMenuKey(e, k) {
+    if (['arrowup', 'w', 'arrowleft', 'a'].includes(k)) { e.preventDefault(); moveMenuFocus(-1); }
+    else if (['arrowdown', 's', 'arrowright', 'd'].includes(k)) { e.preventDefault(); moveMenuFocus(1); }
+    else if (k === 'escape' || k === 'backspace') { e.preventDefault(); if (menuView !== 'main') setMenuView('main'); }
+    else if (k === 'enter' || k === ' ') {
+      // Com um botão focado, o navegador já "clica" nele; sem foco, Enter joga
+      const focused = ui.menu.contains(document.activeElement) && document.activeElement.tagName === 'BUTTON';
+      if (!focused) { e.preventDefault(); if (menuView === 'main') startGame(); }
+    }
+  }
+
+  function pauseGame() {
+    if (state !== 'playing') return;
+    state = 'paused';
+    showOverlay(ui.ovPause);
+  }
+
+  function resumeGame() {
+    if (state !== 'paused') return;
+    state = 'playing';
+    showOverlay(null);
+  }
+
+  function togglePause() {
+    if (state === 'playing') pauseGame();
+    else if (state === 'paused') resumeGame();
+  }
+
+  function gameOver(reason) {
+    state = 'over';
+    const isRecord = score > best;
+    if (isRecord) { best = score; saveBest(best); }
+
+    ui.overReason.textContent = reason;
+    ui.overScore.textContent = score;
+    ui.overBest.textContent = best;
+    ui.overRecord.hidden = !(isRecord && score > 0);
+    updateHud();
+
+    // Tremidinha na tela
+    wrap.classList.remove('shake');
+    void wrap.offsetWidth; // reinicia a animação CSS
+    wrap.classList.add('shake');
+
+    // Pequeno atraso para o jogador ver a batida antes da tela final
+    setTimeout(() => { if (state === 'over') showOverlay(ui.ovOver); }, 450);
+  }
+
+  /* =========================================================
+     COMIDA (Claude Code)
+     ========================================================= */
+  function placeFood() {
+    const head = snake[0];
+    const free = [];
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const p = { x, y };
+        if (!onSnake(p)) free.push(p);
+      }
+    }
+    if (!free.length) { gameOver('Memória cheia: você consumiu tudo! (vitória?)'); return; }
+
+    // Prefere casas não coladas na cabeça, para dar graça à perseguição
+    const far = free.filter((p) => dist2(p, head) >= 9);
+    food = pick(far.length ? far : free);
+    foodPrev = { ...food };
+    foodAnim = 1;
+  }
+
+  // A cada 2 s a comida anda 1 casa para longe da cabeça (se houver espaço livre)
+  function fleeFood() {
+    const head = snake[0];
+    const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
+    let bestCell = null;
+    let bestD = dist2(food, head);
+
+    // Embaralha para desempatar de forma aleatória
+    dirs.sort(() => Math.random() - 0.5);
+    for (const d of dirs) {
+      const c = { x: food.x + d.x, y: food.y + d.y };
+      if (!inBounds(c) || onSnake(c)) continue;
+      const dd = dist2(c, head);
+      if (dd > bestD) { bestD = dd; bestCell = c; }
+    }
+
+    if (bestCell) {
+      foodPrev = { ...food };
+      food = bestCell;
+      foodAnim = 0;
+    }
+  }
+
+  /* =========================================================
+     LÓGICA DE MOVIMENTO
+     ========================================================= */
+  function queueDirection(nx, ny) {
+    // Compara com o último comando da fila (ou a direção atual)
+    const last = dirQueue.length ? dirQueue[dirQueue.length - 1] : dir;
+    if (nx === last.x && ny === last.y) return;     // mesma direção
+    if (nx === -last.x && ny === -last.y) return;   // não pode dar ré
+    if (dirQueue.length < 3) dirQueue.push({ x: nx, y: ny });
+  }
+
+  function step() {
+    prevSnake = snake.map((s) => ({ ...s }));
+    if (dirQueue.length) dir = dirQueue.shift();
+
+    const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+
+    // Colisão com a parede
+    if (!inBounds(head)) { gameOver(pick(WALL_REASONS)); return; }
+
+    const willEat = head.x === food.x && head.y === food.y;
+
+    // Colisão com o corpo (a ponta da cauda sai do lugar, exceto quando come)
+    const body = willEat ? snake : snake.slice(0, -1);
+    if (body.some((s) => s.x === head.x && s.y === head.y)) { gameOver(pick(SELF_REASONS)); return; }
+
+    snake.unshift(head);
+    if (willEat) eat();
+    else snake.pop();
+  }
+
+  function eat() {
+    score++;
+    eaten++;
+    const cx = (food.x + 0.5) * cell;
+    const cy = (food.y + 0.5) * cell;
+
+    spawnParticles(cx, cy);
+    spawnFloater(pick(EAT_MESSAGES), cx, cy, pick(['#d97757', '#3fb950', '#58a6ff', '#e3b341', '#bc8cff']));
+
+    // A cada 5 comidas, acelera um pouco
+    if (eaten % 5 === 0 && delay > MIN_DELAY) {
+      delay = Math.max(MIN_DELAY, delay - DELAY_STEP);
+      spawnFloater(pick(SPEED_MESSAGES), size / 2, size * 0.18, '#58a6ff', 1.25);
+    }
+
+    updateHud();
+    placeFood();
+    fleeTimer = 0; // dá um respiro antes da nova comida começar a fugir
+  }
+
+  /* =========================================================
+     EFEITOS: partículas, ondas e textos flutuantes
+     ========================================================= */
+  function spawnParticles(x, y) {
+    const colors = ['#d97757', '#f0a07f', '#e3b341', '#ffffff', '#ffb38a'];
+    for (let i = 0; i < 26; i++) {
+      const a = rand(0, Math.PI * 2);
+      const sp = rand(0.04, 0.22) * cell;
+      particles.push({
+        x, y,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: 0, max: rand(350, 750),
+        size: rand(0.05, 0.13) * cell,
+        color: pick(colors)
+      });
+    }
+    rings.push({ x, y, life: 0, max: 450 });
+  }
+
+  function spawnFloater(text, x, y, color, scale = 1) {
+    floaters.push({ text, x, y, color, scale, life: 0, max: 1300 });
+  }
+
+  function updateEffects(dt) {
+    const k = dt / 16.67; // normaliza para ~60 fps
+    for (const p of particles) {
+      p.life += dt;
+      p.x += p.vx * k;
+      p.y += p.vy * k;
+      p.vx *= Math.pow(0.93, k);
+      p.vy *= Math.pow(0.93, k);
+    }
+    particles = particles.filter((p) => p.life < p.max);
+
+    for (const r of rings) r.life += dt;
+    rings = rings.filter((r) => r.life < r.max);
+
+    for (const f of floaters) f.life += dt;
+    floaters = floaters.filter((f) => f.life < f.max);
+
+    if (foodAnim < 1) foodAnim = Math.min(1, foodAnim + dt / 220);
+
+    // Olhos giram suavemente para a direção do movimento
+    const t = Math.min(1, 0.25 * k);
+    eyeDir.x = lerp(eyeDir.x, dir.x, t);
+    eyeDir.y = lerp(eyeDir.y, dir.y, t);
+  }
+
+  /* =========================================================
+     DESENHO
+     ========================================================= */
+  function drawBoard() {
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, size, size);
+
+    // Grade sutil
+    ctx.strokeStyle = 'rgba(48, 54, 61, 0.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 1; i < COLS; i++) {
+      const p = Math.round(i * cell) + 0.5;
+      ctx.moveTo(p, 0); ctx.lineTo(p, size);
+      ctx.moveTo(0, p); ctx.lineTo(size, p);
+    }
+    ctx.stroke();
+
+    // "Números de linha" bem apagados, como num editor
+    ctx.fillStyle = 'rgba(139, 148, 158, 0.13)';
+    ctx.font = `${Math.max(8, cell * 0.28)}px ui-monospace, Consolas, monospace`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    for (let y = 0; y < ROWS; y++) ctx.fillText(String(y + 1), cell * 0.08, (y + 0.5) * cell);
+  }
+
+  function drawFood() {
+    // Posição com deslize suave quando ela foge
+    const t = easeOut(foodAnim);
+    const fx = lerp(foodPrev.x, food.x, t);
+    const fy = lerp(foodPrev.y, food.y, t);
+    const cx = (fx + 0.5) * cell;
+    const cy = (fy + 0.5) * cell;
+
+    const pulse = 1 + Math.sin(time / 220) * 0.05;
+    const s = cell * 0.78 * pulse;
+
+    // Ícone de acordo com a skin escolhida
+    paintFoodIcon(ctx, cx, cy, s);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Rótulo "Claude Code" (embaixo; em cima se estiver na última linha)
+    const below = food.y < ROWS - 1;
+    const ly = below ? cy + cell * 0.68 : cy - cell * 0.68;
+    ctx.font = `600 ${Math.max(8, cell * 0.24)}px ui-monospace, Consolas, monospace`;
+    const label = 'Claude Code';
+    const w = ctx.measureText(label).width;
+    const lx = Math.min(Math.max(cx, w / 2 + 2), size - w / 2 - 2);
+    ctx.fillStyle = 'rgba(13, 17, 23, 0.75)';
+    roundRect(lx - w / 2 - 3, ly - cell * 0.17, w + 6, cell * 0.34, 3);
+    ctx.fill();
+    ctx.fillStyle = '#f0a07f';
+    ctx.fillText(label, lx, ly + 0.5);
+  }
+
+  /* =========================================================
+     SKINS DA COMIDA
+     Todas recebem um contexto (c), o centro (cx, cy) e o tamanho (s),
+     assim servem tanto para o tabuleiro quanto para a prévia da tela inicial.
+     ========================================================= */
+  // name: qual skin desenhar (padrão = a escolhida pelo jogador)
+  function paintFoodIcon(c, cx, cy, s, name = skins.food.name) {
+    const img = skins.food.img;
+    if (name === 'buddy') paintBuddy(c, cx, cy, s);
+    else if (name === 'custom' && img) paintCustom(c, cx, cy, s, img);
+    else if (name === 'custom') paintPlaceholder(c, cx, cy, s, 0.26);
+    else paintClassic(c, cx, cy, s);
+  }
+
+  // Cartão "sua imagem" ainda sem imagem: quadrado tracejado com "+"
+  function paintPlaceholder(c, cx, cy, s, round) {
+    c.save();
+    c.setLineDash([s * 0.08, s * 0.06]);
+    c.strokeStyle = '#8b949e';
+    c.lineWidth = Math.max(1, s * 0.03);
+    roundRectOn(c, cx - s / 2, cy - s / 2, s, s, s * round);
+    c.stroke();
+    c.restore();
+    c.fillStyle = '#8b949e';
+    c.font = `${s * 0.5}px ui-monospace, Consolas, monospace`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText('+', cx, cy + s * 0.02);
+  }
+
+  // Skin clássica: quadradinho terracota com ">_"
+  function paintClassic(c, cx, cy, s) {
+    c.save();
+    c.shadowColor = 'rgba(217, 119, 87, 0.8)';
+    c.shadowBlur = s * 0.75;
+    const g = c.createLinearGradient(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2);
+    g.addColorStop(0, '#e8896a');
+    g.addColorStop(1, '#c4613f');
+    c.fillStyle = g;
+    roundRectOn(c, cx - s / 2, cy - s / 2, s, s, s * 0.26);
+    c.fill();
+    c.restore();
+
+    // Símbolo de terminal (o "_" pisca como cursor)
+    c.fillStyle = '#fff8f3';
+    c.font = `bold ${s * 0.49}px ui-monospace, Consolas, monospace`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    const blink = Math.floor(time / 450) % 2 === 0;
+    c.fillText(blink ? '>_' : '> ', cx, cy + s * 0.03);
+  }
+
+  // Skin "buddy pixel": bonequinho em pixel art (desenho original, só uma homenagem)
+  // '#' = corpo, 'e' = olho, 'L' = perna, '.' = vazio
+  const BUDDY = [
+    '..########..',
+    '..########..',
+    '..#e####e#..',
+    '..#e####e#..',
+    '############',
+    '############',
+    '..########..',
+    '..########..',
+    '..L.L..L.L..',
+    '..L.L..L.L..'
+  ];
+  const BUDDY_W = BUDDY[0].length;
+  const BUDDY_H = BUDDY.length;
+
+  function paintBuddy(c, cx, cy, s) {
+    const px = (s * 1.1) / BUDDY_W;                    // tamanho de cada "pixel"
+    const ox = cx - (BUDDY_W * px) / 2;
+    const oy = cy - (BUDDY_H * px) / 2;
+    const bob = Math.floor(time / 200) % 2 === 0 ? 0 : -px * 0.6;  // corpo sobe/desce: "andando"
+    const blink = time % 3000 < 150;                   // pisca de vez em quando
+
+    // Brilho atrás do bonequinho
+    c.save();
+    c.shadowColor = 'rgba(217, 119, 87, 0.85)';
+    c.shadowBlur = s * 0.6;
+    c.fillStyle = 'rgba(217, 119, 87, 0.35)';
+    c.fillRect(ox + 2 * px, oy + bob + px, 8 * px, 6 * px);
+    c.restore();
+
+    for (let y = 0; y < BUDDY_H; y++) {
+      for (let x = 0; x < BUDDY_W; x++) {
+        const ch = BUDDY[y][x];
+        if (ch === '.') continue;
+        const isLeg = ch === 'L';
+        const dy = isLeg ? 0 : bob;                    // pernas ficam no chão
+        c.fillStyle = isLeg ? '#c4613f' : '#d97757';
+        // +0.6 para não aparecer fresta entre os pixels
+        c.fillRect(ox + x * px, oy + y * px + dy, px + 0.6, px + 0.6);
+        if (ch === 'e') {
+          if (blink && y === 2) continue;              // olho fechado: só a linha de baixo
+          c.fillStyle = '#1b1310';
+          c.fillRect(ox + x * px, oy + y * px + dy + (blink ? px * 0.5 : 0), px + 0.6, blink ? px * 0.5 : px + 0.6);
+        }
+      }
+    }
+  }
+
+  // Skin com imagem escolhida pelo jogador
+  function paintCustom(c, cx, cy, s, customImg) {
+    c.save();
+    c.shadowColor = 'rgba(217, 119, 87, 0.8)';
+    c.shadowBlur = s * 0.6;
+    c.fillStyle = '#1c2129';
+    roundRectOn(c, cx - s / 2, cy - s / 2, s, s, s * 0.22);
+    c.fill();
+    c.restore();
+
+    // Recorta em quadrado arredondado e desenha a imagem preenchendo (cover)
+    c.save();
+    roundRectOn(c, cx - s / 2, cy - s / 2, s, s, s * 0.22);
+    c.clip();
+    const iw = customImg.width, ih = customImg.height;
+    const k = Math.max(s / iw, s / ih);
+    c.drawImage(customImg, cx - (iw * k) / 2, cy - (ih * k) / 2, iw * k, ih * k);
+    c.restore();
+  }
+
+  // Prévia da comida na tela inicial
+  // Prévias (comida e cabeça da cobra) na tela inicial
+  function drawPreviewOn(canvasEl, paint) {
+    const r = canvasEl.getBoundingClientRect();
+    if (!r.width) return;
+    const w = Math.round(r.width * dpr);
+    if (canvasEl.width !== w) { canvasEl.width = w; canvasEl.height = w; }
+    const c = canvasEl.getContext('2d');
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, r.width, r.width);
+    paint(c, r.width);
+  }
+  // Desenha todas as prévias da tela visível do menu.
+  // data-pv="snake" / "food" = skin atual; "snake:star" = skin específica.
+  function drawMenuPreviews() {
+    const view = ui.menu.querySelector('.menu-view.active');
+    if (!view) return;
+    view.querySelectorAll('canvas.pv').forEach((cv) => {
+      const [group, name] = cv.dataset.pv.split(':');
+      drawPreviewOn(cv, (c, w) => {
+        if (group === 'snake') paintHead(c, w / 2, w / 2, w * 0.6, 1, 0, name || skins.snake.name);
+        else paintFoodIcon(c, w / 2, w / 2, w * 0.58, name || skins.food.name);
+      });
+    });
+  }
+
+  function drawSnake(alpha) {
+    const n = snake.length;
+    // Posições interpoladas (movimento suave entre os passos)
+    const pts = snake.map((s, i) => {
+      const p = prevSnake[i] || s;
+      return { x: (lerp(p.x, s.x, alpha) + 0.5) * cell, y: (lerp(p.y, s.y, alpha) + 0.5) * cell };
+    });
+
+    // Corpo: da cauda até perto da cabeça, esmaecendo
+    for (let i = n - 1; i >= 1; i--) {
+      const t = i / Math.max(1, n - 1);              // 0 = perto da cabeça, 1 = cauda
+      // Skin estrela: azul → roxo; demais: azul → verde-água
+      const hue = skins.snake.name === 'star' ? lerp(220, 290, t) : lerp(205, 150, t);
+      const a = lerp(0.95, 0.3, t);                  // vai sumindo até a cauda
+      const s = cell * lerp(0.82, 0.55, t);
+      const color = `hsla(${hue}, 75%, ${lerp(60, 47, t)}%, ${a})`;
+
+      // "Ponte" até o segmento da frente, para o corpo parecer contínuo
+      const nx = pts[i - 1];
+      ctx.strokeStyle = color;
+      ctx.lineWidth = s * 0.78;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(pts[i].x, pts[i].y);
+      ctx.lineTo(nx.x, nx.y);
+      ctx.stroke();
+
+      ctx.fillStyle = color;
+      roundRect(pts[i].x - s / 2, pts[i].y - s / 2, s, s, s * 0.38);
+      ctx.fill();
+    }
+
+    drawHead(pts[0].x, pts[0].y);
+  }
+
+  function drawHead(cx, cy) {
+    // Direção dos olhos (suavizada), normalizada
+    const len = Math.hypot(eyeDir.x, eyeDir.y) || 1;
+    paintHead(ctx, cx, cy, cell, eyeDir.x / len, eyeDir.y / len);
+  }
+
+  /* =========================================================
+     SKINS DA COBRA
+     Recebem o contexto (c), o centro, o tamanho da casa (cell)
+     e a direção do olhar (dx, dy). Servem para o jogo e para a prévia.
+     ========================================================= */
+  function paintHead(c, cx, cy, cell, dx, dy, name = skins.snake.name) {
+    const img = skins.snake.img;
+    if (name === 'star') paintHeadStar(c, cx, cy, cell, dx, dy);
+    else if (name === 'custom' && img) paintHeadCustom(c, cx, cy, cell, img);
+    else if (name === 'custom') paintPlaceholder(c, cx, cy, cell * 1.1, 0.5);
+    else paintHeadClassic(c, cx, cy, cell, dx, dy);
+  }
+
+  // Olhinhos que olham na direção (dx, dy)
+  function paintEyes(c, cx, cy, cell, dx, dy) {
+    const px = -dy, py = dx; // perpendicular
+    const fwd = cell * 0.3, side = cell * 0.21;
+    const er = cell * 0.11, pr = cell * 0.058;
+    for (const sgn of [-1, 1]) {
+      const ex = cx + dx * fwd + px * side * sgn;
+      const ey = cy + dy * fwd + py * side * sgn;
+      c.fillStyle = '#ffffff';
+      c.beginPath(); c.arc(ex, ey, er, 0, Math.PI * 2); c.fill();
+      c.fillStyle = '#0d1117';
+      c.beginPath(); c.arc(ex + dx * er * 0.45, ey + dy * er * 0.45, pr, 0, Math.PI * 2); c.fill();
+    }
+  }
+
+  // Skin "estrela ✦": estrela de 4 pontas com gradiente azul → roxo → rosa
+  function paintHeadStar(c, cx, cy, cell, dx, dy) {
+    const r = cell * 0.56;
+
+    // Base redonda escura com brilho, para a cabeça continuar "lendo" como cabeça
+    c.save();
+    c.shadowColor = 'rgba(140, 120, 255, 0.7)';
+    c.shadowBlur = cell * 0.6;
+    const base = c.createRadialGradient(cx, cy, r * 0.1, cx, cy, r);
+    base.addColorStop(0, '#2a2f5a');
+    base.addColorStop(1, '#151832');
+    c.fillStyle = base;
+    c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
+    c.restore();
+
+    // Estrela: 4 pontas ligadas por curvas que passam perto do centro
+    const R = r * 1.12; // pontas saem um pouco da base redonda
+    const rot = Math.sin(time / 700) * 0.18 + Math.atan2(dy, dx); // gira com a direção + balanço
+    const g = c.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
+    g.addColorStop(0, '#4f8ff7');
+    g.addColorStop(0.55, '#9b72f2');
+    g.addColorStop(1, '#e06c9f');
+    c.save();
+    c.translate(cx, cy);
+    c.rotate(rot);
+    c.beginPath();
+    c.moveTo(0, -R);
+    const k = R * 0.12; // quanto a curva "aperta" perto do centro
+    c.quadraticCurveTo(k, -k, R, 0);
+    c.quadraticCurveTo(k, k, 0, R);
+    c.quadraticCurveTo(-k, k, -R, 0);
+    c.quadraticCurveTo(-k, -k, 0, -R);
+    c.closePath();
+    c.fillStyle = g;
+    c.fill();
+    c.restore();
+
+    paintEyes(c, cx, cy, cell, dx, dy);
+  }
+
+  // Skin com imagem do jogador: recortada em círculo, com anel colorido
+  function paintHeadCustom(c, cx, cy, cell, img) {
+    const r = cell * 0.58;
+    c.save();
+    c.shadowColor = 'rgba(88, 166, 255, 0.6)';
+    c.shadowBlur = cell * 0.5;
+    c.fillStyle = '#1c2129';
+    c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.fill();
+    c.restore();
+
+    c.save();
+    c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.clip();
+    const k = Math.max((2 * r) / img.width, (2 * r) / img.height);
+    c.drawImage(img, cx - (img.width * k) / 2, cy - (img.height * k) / 2, img.width * k, img.height * k);
+    c.restore();
+
+    c.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    c.lineWidth = Math.max(1, cell * 0.05);
+    c.beginPath(); c.arc(cx, cy, r, 0, Math.PI * 2); c.stroke();
+  }
+
+  // Skin clássica "AG" (c e cell sombreiam os globais de propósito,
+  // para a mesma função desenhar no jogo e na prévia)
+  function paintHeadClassic(c, cx, cy, cell, dx, dy) {
+    const ctx = c;
+    const r = cell * 0.56;
+
+    // Gradiente colorido girando devagar (azul/verde/amarelo/vermelho)
+    let g;
+    if (ctx.createConicGradient) {
+      g = ctx.createConicGradient(time / 900, cx, cy);
+      g.addColorStop(0, '#4285f4');
+      g.addColorStop(0.25, '#34a853');
+      g.addColorStop(0.5, '#fbbc05');
+      g.addColorStop(0.75, '#ea4335');
+      g.addColorStop(1, '#4285f4');
+    } else {
+      g = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+      g.addColorStop(0, '#4285f4');
+      g.addColorStop(0.35, '#34a853');
+      g.addColorStop(0.65, '#fbbc05');
+      g.addColorStop(1, '#ea4335');
+    }
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(88, 166, 255, 0.6)';
+    ctx.shadowBlur = cell * 0.5;
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Aro interno para dar volume
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.lineWidth = Math.max(1, cell * 0.04);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.88, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Texto "AG" levemente para trás, abrindo espaço para os olhos
+    const tx = cx - dx * cell * 0.1;
+    const ty = cy - dy * cell * 0.1;
+    ctx.font = `900 ${cell * 0.3}px ui-monospace, Consolas, monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = cell * 0.08;
+    ctx.strokeStyle = 'rgba(13, 17, 23, 0.85)';
+    ctx.strokeText('AG', tx, ty + 0.5);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('AG', tx, ty + 0.5);
+
+    // Olhinhos na frente da cabeça, olhando na direção do movimento
+    paintEyes(ctx, cx, cy, cell, dx, dy);
+  }
+
+  function drawEffects() {
+    // Ondas de impacto
+    for (const r of rings) {
+      const t = r.life / r.max;
+      ctx.strokeStyle = `rgba(240, 160, 127, ${1 - t})`;
+      ctx.lineWidth = cell * 0.08 * (1 - t) + 0.5;
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, cell * (0.4 + t * 1.6), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Partículas com brilho aditivo
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const p of particles) {
+      const t = p.life / p.max;
+      ctx.globalAlpha = 1 - t;
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * (1 - t * 0.5), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Textos flutuantes subindo e sumindo
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const f of floaters) {
+      const t = f.life / f.max;
+      const fs = Math.max(12, cell * 0.5) * f.scale * (t < 0.15 ? lerp(0.6, 1, t / 0.15) : 1);
+      ctx.font = `bold ${fs}px ui-monospace, Consolas, monospace`;
+      const w = ctx.measureText(f.text).width;
+      const x = Math.min(Math.max(f.x, w / 2 + 6), size - w / 2 - 6);
+      const y = Math.max(fs, f.y - easeOut(t) * cell * 2.2);
+      ctx.globalAlpha = t > 0.6 ? 1 - (t - 0.6) / 0.4 : 1;
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(13, 17, 23, 0.9)';
+      ctx.strokeText(f.text, x, y);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, x, y);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function draw() {
+    // Fração entre o passo anterior e o próximo (para interpolar)
+    const alpha = state === 'start' ? 1 : Math.min(1, acc / delay);
+    drawBoard();
+    drawFood();
+    drawSnake(alpha);
+    drawEffects();
+  }
+
+  /* =========================================================
+     LAÇO PRINCIPAL (requestAnimationFrame)
+     ========================================================= */
+  let lastTime = performance.now();
+  function loop(now) {
+    const dt = Math.min(100, now - lastTime); // evita saltos após trocar de aba
+    lastTime = now;
+
+    if (state !== 'paused') time += dt;
+
+    if (state === 'playing') {
+      acc += dt;
+      while (acc >= delay && state === 'playing') {
+        acc -= delay;
+        step();
+      }
+      fleeTimer += dt;
+      if (fleeTimer >= FLEE_INTERVAL && state === 'playing') {
+        fleeTimer -= FLEE_INTERVAL;
+        fleeFood();
+      }
+    }
+
+    if (state !== 'paused') updateEffects(dt);
+    draw();
+    if (menuOpen()) drawMenuPreviews();
+    requestAnimationFrame(loop);
+  }
+
+  /* =========================================================
+     CONTROLES: teclado
+     ========================================================= */
+  const KEY_DIRS = {
+    arrowup: [0, -1], w: [0, -1],
+    arrowdown: [0, 1], s: [0, 1],
+    arrowleft: [-1, 0], a: [-1, 0],
+    arrowright: [1, 0], d: [1, 0]
+  };
+
+  // Comando de direção vindo de qualquer fonte (teclado, botão, deslize)
+  function handleDirection(dx, dy) {
+    if (state === 'start') startGame();
+    else if (state === 'paused') resumeGame();
+    else if (state === 'over') return; // evita reiniciar sem querer
+    queueDirection(dx, dy);
+  }
+
+  document.addEventListener('keydown', (e) => {
+    const k = e.key.toLowerCase();
+
+    // No menu, o teclado navega pelas opções
+    if (menuOpen()) { handleMenuKey(e, k); return; }
+
+    // M: volta ao menu (pausado ou game over)
+    if (k === 'm' && (state === 'paused' || state === 'over')) { e.preventDefault(); openMenu(); return; }
+
+    if (KEY_DIRS[k]) {
+      e.preventDefault();
+      handleDirection(KEY_DIRS[k][0], KEY_DIRS[k][1]);
+      return;
+    }
+
+    if (k === ' ' || k === 'p' || k === 'enter' || k === 'escape') {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (state === 'start' && k !== 'escape') startGame();
+      else if (state === 'over' && (k === ' ' || k === 'enter')) startGame();
+      else if (k === 'escape') pauseGame();
+      else if (k !== 'enter') togglePause();
+    }
+  });
+
+  /* =========================================================
+     CONTROLES: botões na tela e gesto de deslizar (celular)
+     ========================================================= */
+  const BTN_DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+  document.querySelectorAll('.controls [data-dir]').forEach((btn) => {
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      const d = BTN_DIRS[btn.dataset.dir];
+      handleDirection(d[0], d[1]);
+    });
+  });
+
+  $('btn-pause').addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    if (state === 'start' || state === 'over') startGame();
+    else togglePause();
+  });
+
+  // Deslizar o dedo sobre o tabuleiro também muda a direção
+  let touchStart = null;
+  canvas.addEventListener('touchstart', (e) => {
+    const t = e.changedTouches[0];
+    touchStart = { x: t.clientX, y: t.clientY };
+  }, { passive: true });
+  canvas.addEventListener('touchmove', (e) => {
+    if (!touchStart) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStart.x;
+    const dy = t.clientY - touchStart.y;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
+    if (Math.abs(dx) > Math.abs(dy)) handleDirection(Math.sign(dx), 0);
+    else handleDirection(0, Math.sign(dy));
+    touchStart = { x: t.clientX, y: t.clientY }; // permite curvas em sequência
+    e.preventDefault();
+  }, { passive: false });
+  canvas.addEventListener('touchend', () => { touchStart = null; });
+
+  // Botões das telas sobrepostas (blur evita que o Espaço "clique" de novo)
+  function bindButton(id, fn) {
+    const b = $(id);
+    b.addEventListener('click', () => { b.blur(); fn(); });
+  }
+  bindButton('btn-resume', resumeGame);
+  bindButton('btn-restart', startGame);
+  bindButton('btn-menu-pause', openMenu);
+  bindButton('btn-menu-over', openMenu);
+
+  // Itens do menu (data-action)
+  ui.menu.querySelectorAll('[data-action]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const action = b.dataset.action;
+      if (action === 'play') startGame();
+      else if (action === 'back') setMenuView('main');
+      else setMenuView(action); // 'skins' ou 'howto'
+    });
+  });
+
+  // Cartões de skin (data-group = "food" ou "snake")
+  document.querySelectorAll('.skin-card').forEach((b) => {
+    b.addEventListener('click', () => {
+      const group = b.dataset.group;
+      if (b.dataset.skin === 'custom') {
+        if (skins[group].img) setSkin(group, 'custom');  // já tem imagem: usa, e deixa trocar
+        $('skin-file-' + group).click();
+      } else {
+        setSkin(group, b.dataset.skin);
+      }
+    });
+  });
+
+  // Jogador escolheu uma imagem do computador/celular
+  ['food', 'snake'].forEach((group) => {
+    const input = $('skin-file-' + group);
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.value = '';
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        loadImage(reader.result, (img) => {
+          if (!img) return;
+          const g = skins[group];
+          g.img = shrinkImage(img);
+          storageSet(g.imgKey, g.img.toDataURL('image/png'));
+          setSkin(group, 'custom');
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  });
+
+  // Restaura as skins salvas
+  ['food', 'snake'].forEach((group) => {
+    const g = skins[group];
+    const saved = storageGet(g.key) || 'classic';
+    const imgData = storageGet(g.imgKey);
+    if (imgData) {
+      loadImage(imgData, (img) => {
+        if (img) g.img = shrinkImage(img);
+        setSkin(group, saved);
+      });
+    } else {
+      setSkin(group, saved);
+    }
+  });
+
+  // Pausa automática ao trocar de aba
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
+
+  /* =========================================================
+     INICIALIZAÇÃO
+     ========================================================= */
+  resize();
+  openMenu();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
