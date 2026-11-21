@@ -310,6 +310,7 @@
     -webkit-background-clip: text; background-clip: text;
   }
   #btn-theme b { color: var(--orange); }
+  #btn-board b { color: var(--blue); }
 </style>
 </head>
 <body>
@@ -382,6 +383,7 @@
           <button class="menu-item primary" data-action="play">▶ Jogar</button>
           <button class="menu-item" data-action="skins">🎨 Skins</button>
           <button class="menu-item" data-action="theme" id="btn-theme">🎃 Modo: <b id="theme-label">Normal</b></button>
+          <button class="menu-item" data-action="board" id="btn-board">🌀 Tabuleiro: <b id="board-label">Normal</b></button>
           <button class="menu-item" data-action="howto">❔ Como jogar</button>
         </nav>
         <p class="menu-best">recorde: <b id="menu-best">0</b></p>
@@ -431,9 +433,11 @@
           <li><b>Mover:</b> <kbd>←↑↓→</kbd> ou <kbd>WASD</kbd>. No celular, use os botões ou deslize o dedo.</li>
           <li><b>Pausar:</b> <kbd>P</kbd> ou <kbd>Espaço</kbd>. <kbd>M</kbd> volta ao menu.</li>
           <li><b>Cuidado:</b> bater na parede ou no próprio corpo é game over.</li>
+          <li><b>🌀 Tabuleiro infinito:</b> escolha no menu. Nele não há paredes: a cobra sai de um lado
+            e volta pelo outro (o Claude Code inimigo também!).</li>
           <li><b>Pegadinha:</b> a cada 2 segundos o Claude Code foge uma casa para longe de você.</li>
           <li><b>Velocidade:</b> aumenta a cada 5 itens comidos.</li>
-          <li><b>⚠ Contra-ataque:</b> a cada 10 itens, o Claude Code vira uma cobra e te persegue por 15 s.
+          <li><b>⚠ Contra-ataque:</b> a cada 5 itens, o Claude Code vira uma cobra e te persegue por 15 s.
             Se ele morder seu corpo, você perde um pedaço; se pegar sua cabeça, é game over.
             Fuja até o tempo acabar (+5) ou ataque a cauda dele <b>✂</b> (+2 cada) até derrotá-lo (+10).</li>
         </ul>
@@ -468,7 +472,7 @@
   const MIN_DELAY = 60;         // velocidade máxima (ms por passo)
   const DELAY_STEP = 12;        // quanto acelera a cada 5 comidas
   const FLEE_INTERVAL = 2000;   // a comida tenta fugir a cada 2 s
-  const CHASE_EVERY = 10;       // a cada 10 comidas, o Claude Code contra-ataca
+  const CHASE_EVERY = 5;        // a cada 5 comidas, o Claude Code contra-ataca
   const CHASE_TIME = 15000;     // duração da perseguição (ms)
   const WARN_TIME = 1600;       // aviso antes do inimigo começar a andar (ms)
   const STORAGE_KEY = 'antigravity-vs-claude-code:recorde';
@@ -575,6 +579,50 @@
   /* =========================================================
      MODO / TEMA: 'normal' ou 'halloween' (salvo no localStorage)
      ========================================================= */
+  /* =========================================================
+     TABULEIRO: normal (paredes matam) ou infinito (atravessa e volta do outro lado)
+     ========================================================= */
+  const BOARD_KEY = 'antigravity-vs-claude-code:tabuleiro';
+  let infiniteBoard = false;
+
+  function setBoardMode(infinite) {
+    infiniteBoard = !!infinite;
+    storageSet(BOARD_KEY, infiniteBoard ? 'infinito' : 'normal');
+    $('board-label').textContent = infiniteBoard ? 'Infinito ∞' : 'Normal';
+  }
+
+  // Vizinho de (x, y) na direção d: no infinito dá a volta; no normal, null fora da grade
+  function stepFrom(p, d) {
+    let x = p.x + d.x, y = p.y + d.y;
+    if (infiniteBoard) {
+      x = (x + COLS) % COLS;
+      y = (y + ROWS) % ROWS;
+    } else if (x < 0 || y < 0 || x >= COLS || y >= ROWS) {
+      return null;
+    }
+    return { x, y };
+  }
+
+  // Distância² no tabuleiro: no infinito conta o caminho "dando a volta"
+  function boardDist2(a, b) {
+    let dx = Math.abs(a.x - b.x), dy = Math.abs(a.y - b.y);
+    if (infiniteBoard) { dx = Math.min(dx, COLS - dx); dy = Math.min(dy, ROWS - dy); }
+    return dx * dx + dy * dy;
+  }
+
+  // Posição interpolada entre o passo anterior (p) e o atual (s).
+  // Se o segmento atravessou a borda, desliza para fora em vez de cruzar a tela inteira.
+  function interpPos(p, s, alpha) {
+    let dx = s.x - p.x, dy = s.y - p.y;
+    if (Math.abs(dx) > 1) dx -= Math.sign(dx) * COLS;
+    if (Math.abs(dy) > 1) dy -= Math.sign(dy) * ROWS;
+    if (alpha >= 1) return { x: (s.x + 0.5) * cell, y: (s.y + 0.5) * cell };
+    return { x: (p.x + dx * alpha + 0.5) * cell, y: (p.y + dy * alpha + 0.5) * cell };
+  }
+
+  // "Ponte" entre segmentos só se forem vizinhos na tela (não liga as duas bordas)
+  const closeOnScreen = (a, b) => Math.abs(a.x - b.x) < cell * 1.5 && Math.abs(a.y - b.y) < cell * 1.5;
+
   const THEME_KEY = 'antigravity-vs-claude-code:modo';
   let theme = 'normal';
   const isHalloween = () => theme === 'halloween';
@@ -836,7 +884,7 @@
     if (!free.length) { gameOver('Memória cheia: você consumiu tudo! (vitória?)'); return; }
 
     // Prefere casas não coladas na cabeça, para dar graça à perseguição
-    const far = free.filter((p) => dist2(p, head) >= 9);
+    const far = free.filter((p) => boardDist2(p, head) >= 9);
     food = pick(far.length ? far : free);
     foodPrev = { ...food };
     foodAnim = 1;
@@ -847,14 +895,15 @@
     const head = snake[0];
     const dirs = [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }];
     let bestCell = null;
-    let bestD = dist2(food, head);
+    // No infinito a distância considera "dar a volta"; a comida em si não atravessa bordas
+    let bestD = boardDist2(food, head);
 
     // Embaralha para desempatar de forma aleatória
     dirs.sort(() => Math.random() - 0.5);
     for (const d of dirs) {
       const c = { x: food.x + d.x, y: food.y + d.y };
       if (!inBounds(c) || onSnake(c)) continue;
-      const dd = dist2(c, head);
+      const dd = boardDist2(c, head);
       if (dd > bestD) { bestD = dd; bestCell = c; }
     }
 
@@ -880,10 +929,11 @@
     prevSnake = snake.map((s) => ({ ...s }));
     if (dirQueue.length) dir = dirQueue.shift();
 
-    const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+    // No tabuleiro infinito, sair por um lado faz voltar pelo outro
+    const head = stepFrom(snake[0], dir);
 
-    // Colisão com a parede
-    if (!inBounds(head)) { gameOver(pick(themed(WALL_REASONS, 'wall'))); return; }
+    // Colisão com a parede (só no tabuleiro normal)
+    if (!head) { gameOver(pick(themed(WALL_REASONS, 'wall'))); return; }
 
     // Durante o contra-ataque não há comida no tabuleiro
     const willEat = !chase && head.x === food.x && head.y === food.y;
@@ -934,7 +984,7 @@
         if (!onSnake(p)) free.push(p);
       }
     }
-    free.sort((a, b) => dist2(b, head) - dist2(a, head));
+    free.sort((a, b) => boardDist2(b, head) - boardDist2(a, head));
     const spawn = pick(free.slice(0, 12));
 
     // Começa "enrolado" numa casa só e vai se desenrolando ao andar
@@ -966,9 +1016,10 @@
     const blocked = new Uint8Array(COLS * ROWS);
     for (let i = 0; i < segs.length - 1; i++) blocked[key(segs[i].x, segs[i].y)] = 1;
 
+    // Movimentos possíveis (no infinito, o inimigo também atravessa as bordas)
     const valid = DIRS4.filter((d) => {
-      const x = head.x + d.x, y = head.y + d.y;
-      return x >= 0 && y >= 0 && x < COLS && y < ROWS && !blocked[key(x, y)];
+      const n = stepFrom(head, d);
+      return n && !blocked[key(n.x, n.y)];
     });
     if (!valid.length) return null;
 
@@ -985,9 +1036,9 @@
       const cx = cur % COLS, cy = (cur / COLS) | 0;
       if (cx === target.x && cy === target.y) { found = cur; break; }
       for (const d of DIRS4) {
-        const nx = cx + d.x, ny = cy + d.y;
-        if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
-        const nk = key(nx, ny);
+        const n = stepFrom({ x: cx, y: cy }, d);
+        if (!n) continue;
+        const nk = key(n.x, n.y);
         if (prev[nk] !== -1 || blocked[nk]) continue;
         prev[nk] = cur;
         queue.push(nk);
@@ -995,15 +1046,15 @@
     }
 
     if (found >= 0) {
-      // Volta pelo caminho até achar o primeiro passo
+      // Volta pelo caminho até achar o primeiro passo e descobre qual direção leva até ele
       let c = found;
       while (prev[c] !== start) c = prev[c];
-      return { x: (c % COLS) - head.x, y: ((c / COLS) | 0) - head.y };
+      const first = { x: c % COLS, y: (c / COLS) | 0 };
+      return DIRS4.find((d) => { const n = stepFrom(head, d); return n && samePos(n, first); }) || pick(valid);
     }
 
     // Sem caminho: vai para a casa válida mais próxima do alvo
-    valid.sort((a, b) =>
-      dist2({ x: head.x + a.x, y: head.y + a.y }, target) - dist2({ x: head.x + b.x, y: head.y + b.y }, target));
+    valid.sort((a, b) => boardDist2(stepFrom(head, a), target) - boardDist2(stepFrom(head, b), target));
     return valid[0];
   }
 
@@ -1012,7 +1063,7 @@
     chase.prevSegs = chase.segs.map((s) => ({ ...s }));
     if (!d) return; // encurralado: fica parado
 
-    const nh = { x: chase.segs[0].x + d.x, y: chase.segs[0].y + d.y };
+    const nh = stepFrom(chase.segs[0], d);
 
     // Pegou a sua cabeça: fim de jogo
     if (samePos(nh, snake[0])) { gameOver(pick(themed(CAUGHT_REASONS, 'caught'))); return; }
@@ -1094,7 +1145,7 @@
     updateHud();
     fleeTimer = 0; // dá um respiro antes da nova comida começar a fugir
 
-    // A cada 10 comidas, o próximo Claude Code vira cobra e contra-ataca
+    // A cada 5 comidas, o próximo Claude Code vira cobra e contra-ataca
     if (eaten % CHASE_EVERY === 0) startChase();
     else placeFood();
   }
@@ -1186,6 +1237,23 @@
     for (let y = 0; y < ROWS; y++) ctx.fillText(String(y + 1), cell * 0.08, (y + 0.5) * cell);
 
     if (hw) drawBats();
+    if (infiniteBoard) drawPortalEdges();
+  }
+
+  // Tabuleiro infinito: bordas tracejadas "andando" com brilho, como portais
+  function drawPortalEdges() {
+    const hw = isHalloween();
+    const pulse = 0.5 + 0.5 * Math.sin(time / 400);
+    const lw = Math.max(2, cell * 0.12);
+    ctx.save();
+    ctx.shadowColor = hw ? 'rgba(195, 155, 255, 0.9)' : 'rgba(88, 166, 255, 0.9)';
+    ctx.shadowBlur = cell * 0.6;
+    ctx.strokeStyle = hw ? `rgba(195, 155, 255, ${0.45 + 0.35 * pulse})` : `rgba(88, 166, 255, ${0.45 + 0.35 * pulse})`;
+    ctx.lineWidth = lw;
+    ctx.setLineDash([cell * 0.5, cell * 0.35]);
+    ctx.lineDashOffset = -time / 30;
+    ctx.strokeRect(lw / 2, lw / 2, size - lw, size - lw);
+    ctx.restore();
   }
 
   /* =========================================================
@@ -1520,10 +1588,7 @@
   function drawSnake(alpha) {
     const n = snake.length;
     // Posições interpoladas (movimento suave entre os passos)
-    const pts = snake.map((s, i) => {
-      const p = prevSnake[i] || s;
-      return { x: (lerp(p.x, s.x, alpha) + 0.5) * cell, y: (lerp(p.y, s.y, alpha) + 0.5) * cell };
-    });
+    const pts = snake.map((s, i) => interpPos(prevSnake[i] || s, s, alpha));
 
     // Corpo: da cauda até perto da cabeça, esmaecendo
     for (let i = n - 1; i >= 1; i--) {
@@ -1537,14 +1602,17 @@
       const color = `hsla(${hue}, 75%, ${lerp(60, 47, t)}%, ${a})`;
 
       // "Ponte" até o segmento da frente, para o corpo parecer contínuo
+      // (pulada quando o corpo está dividido entre as duas bordas no tabuleiro infinito)
       const nx = pts[i - 1];
-      ctx.strokeStyle = color;
-      ctx.lineWidth = s * 0.78;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(pts[i].x, pts[i].y);
-      ctx.lineTo(nx.x, nx.y);
-      ctx.stroke();
+      if (closeOnScreen(pts[i], nx)) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = s * 0.78;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(pts[i].x, pts[i].y);
+        ctx.lineTo(nx.x, nx.y);
+        ctx.stroke();
+      }
 
       ctx.fillStyle = color;
       roundRect(pts[i].x - s / 2, pts[i].y - s / 2, s, s, s * 0.38);
@@ -1798,10 +1866,7 @@
     const e = chase;
     const alpha = e.phase === 'hunt' ? Math.min(1, e.acc / e.delay) : 1;
     const n = e.segs.length;
-    const pts = e.segs.map((s, i) => {
-      const p = e.prevSegs[i] || s;
-      return { x: (lerp(p.x, s.x, alpha) + 0.5) * cell, y: (lerp(p.y, s.y, alpha) + 0.5) * cell };
-    });
+    const pts = e.segs.map((s, i) => interpPos(e.prevSegs[i] || s, s, alpha));
 
     // Corpo terracota, esmaecendo até a cauda
     for (let i = n - 1; i >= 1; i--) {
@@ -1811,13 +1876,15 @@
       const color = isHalloween()
         ? `hsla(270, 45%, ${lerp(78, 55, t)}%, ${lerp(0.75, 0.3, t)})`
         : `hsla(16, 68%, ${lerp(58, 42, t)}%, ${lerp(0.95, 0.6, t)})`;
-      ctx.strokeStyle = color;
-      ctx.lineWidth = s * 0.78;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(pts[i].x, pts[i].y);
-      ctx.lineTo(pts[i - 1].x, pts[i - 1].y);
-      ctx.stroke();
+      if (closeOnScreen(pts[i], pts[i - 1])) {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = s * 0.78;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(pts[i].x, pts[i].y);
+        ctx.lineTo(pts[i - 1].x, pts[i - 1].y);
+        ctx.stroke();
+      }
       ctx.fillStyle = color;
       roundRect(pts[i].x - s / 2, pts[i].y - s / 2, s, s, s * 0.3);
       ctx.fill();
@@ -2075,6 +2142,7 @@
       if (action === 'play') startGame();
       else if (action === 'back') setMenuView('main');
       else if (action === 'theme') setTheme(isHalloween() ? 'normal' : 'halloween');
+      else if (action === 'board') setBoardMode(!infiniteBoard);
       else setMenuView(action); // 'skins' ou 'howto'
     });
   });
@@ -2115,6 +2183,7 @@
 
   // Restaura o modo salvo
   setTheme(storageGet(THEME_KEY) || 'normal');
+  setBoardMode(storageGet(BOARD_KEY) === 'infinito');
 
   // Restaura as skins salvas
   ['food', 'snake'].forEach((group) => {

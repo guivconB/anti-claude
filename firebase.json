@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "site": "anti-claude",
     "public": ".",
     "ignore": [
       "firebase.json",
